@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"io/fs"
 	"net/http"
 	"strconv"
 
@@ -13,6 +14,7 @@ import (
 type Server struct {
 	Store  *database.Store
 	Sender SenderService
+	UIRoot fs.FS // embedded frontend, nil in dev mode
 }
 
 type SenderService interface {

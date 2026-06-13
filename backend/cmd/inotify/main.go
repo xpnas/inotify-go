@@ -18,6 +18,7 @@ func main() {
 	srv := &handlers.Server{
 		Store:  store,
 		Sender: sender.New(store),
+		UIRoot: LoadUI(),
 	}
 	log.Printf("inotify listening on %s", cfg.Addr)
 	if err := srv.Router().Run(cfg.Addr); err != nil {

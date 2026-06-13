@@ -2,6 +2,8 @@
 
 Inotify 是一个轻量级消息通知管理系统。当前项目已经重组为 Go 后端和 Vue 3 管理后台，不再包含旧版 .NET Core 与 Vue 2 代码。
 
+**项目地址**：[https://github.com/xpnas/inotify-go](https://github.com/xpnas/inotify-go)
+
 ## 技术栈
 
 - Backend: Go 1.22, Gin, Gorm, SQLite
@@ -10,8 +12,8 @@ Inotify 是一个轻量级消息通知管理系统。当前项目已经重组为
 
 ## 功能
 
-- 用户登录、JWT 鉴权、GitHub OAuth 登录
-- 消息通道管理
+- 用户登录、JWT 鉴权、GitHub OAuth 登录、企业微信扫码登录
+- 消息通道管理（企业微信、邮件、Telegram、钉钉、飞书、Bark、WxPusher 等）
 - 当前账号 Token 与发送示例
 - 当前账号历史消息查询和分页
 - 系统状态、用户管理、全局参数、JWT 参数
@@ -20,99 +22,68 @@ Inotify 是一个轻量级消息通知管理系统。当前项目已经重组为
 
 ## 通道
 
-- 企业微信应用消息
+- 企业微信应用消息（支持图片 URL 自动转图文消息）
 - SMTP 邮件
-- Telegram Bot
-- 自定义 GET
-- 自定义 POST
+- Telegram Bot（支持图片 URL 自动转 sendPhoto）
 - 钉钉群机器人
 - 飞书群机器人
+- WxPusher（标准推送 + SPT 极简推送）
+- 自定义 GET
+- 自定义 POST
 - Bark
 
 ## 目录
 
 ```text
 .
-├── backend/              # Go API 服务
-├── frontend/             # Vue 3 管理后台
-├── docs/                 # 开发、部署、接口文档
-├── scripts/              # 本地辅助脚本
-├── docker-compose.yml    # 本地/生产 Compose 编排
-└── .github/workflows/    # CI 与 Docker 镜像自动化
+├── backend/                  # Go API 服务
+├── frontend/                 # Vue 3 管理后台
+├── docs/                     # 开发、部署、接口文档
+├── scripts/                  # 本地辅助脚本
+├── docker-compose.yml        # 生产一键部署（拉取预构建镜像）
+├── docker-compose.build.yml  # 本地从源码构建
+└── .github/workflows/        # CI 与 Docker 镜像自动化
 ```
 
-## 快速启动
+## 一键安装（推荐）
 
-### 安装 Docker
-
-先安装 Docker 和 Docker Compose：
-
-- Windows/macOS: 安装 Docker Desktop。
-- Linux: 安装 Docker Engine，并确认 Compose v2 可用。
-
-验证：
+确保已安装 Docker 和 Docker Compose，执行：
 
 ```bash
-docker --version
-docker compose version
+curl -fsSL https://raw.githubusercontent.com/xpnas/inotify-go/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
 ```
 
-### Docker Compose
-
-```bash
-cp .env.example .env
-docker compose up -d --build
-```
-
-访问 `http://localhost:9000`。
-
-默认账号：
+访问 `http://<服务器IP>:9000`，默认账号：
 
 ```text
 用户名: admin
 密码: 123456
 ```
 
-运行数据会写入 Docker volume `inotify_data`。
-
-常用命令：
+如需修改端口，在启动前设置环境变量：
 
 ```bash
-docker compose ps
-docker compose logs -f
-docker compose restart
-docker compose down
+INOTIFY_HTTP_PORT=8080 docker compose up -d
 ```
 
-升级：
+升级到最新版：
 
 ```bash
-docker compose pull
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
-### GitHub Docker 自动化
+## 从源码构建
 
-项目已配置 GitHub Actions: [.github/workflows/ci.yml](.github/workflows/ci.yml)。
+克隆仓库后使用 `docker-compose.build.yml`：
 
-自动化流程：
-
-- push 或 pull request 到 `main` / `master` 时运行后端测试。
-- push 或 pull request 到 `main` / `master` 时运行前端 lint 和 build。
-- push 到 `main` / `master` 时构建 Docker 镜像并推送到 GitHub Container Registry。
-
-镜像地址格式：
-
-```text
-ghcr.io/<owner>/<repo>/backend:latest
-ghcr.io/<owner>/<repo>/frontend:latest
-ghcr.io/<owner>/<repo>/backend:<commit-sha>
-ghcr.io/<owner>/<repo>/frontend:<commit-sha>
+```bash
+git clone https://github.com/xpnas/inotify-go.git
+cd inotify-go
+docker compose -f docker-compose.build.yml up -d --build
 ```
 
-如果仓库是私有仓库，需要在 GitHub Packages 里给镜像配置访问权限，或登录 GHCR 后拉取。
-
-### 本地开发
+## 本地开发
 
 后端：
 
@@ -154,6 +125,22 @@ Content-Type: application/json
 
 更多接口说明见 [docs/API.md](docs/API.md)。
 
+## Docker 镜像
+
+镜像由 GitHub Actions 自动构建并推送至 GitHub Container Registry，支持 `linux/amd64` 和 `linux/arm64`，前后端已打包为单一镜像：
+
+```text
+ghcr.io/xpnas/inotify-go:latest
+```
+
+## GitHub Actions
+
+每次推送到 `main` / `master` 分支时自动：
+
+1. 运行后端 `go test ./...`
+2. 运行前端 lint 和 build
+3. 构建多平台 Docker 镜像并推送到 GHCR
+
 ## 文档
 
 - [开发说明](docs/DEVELOPMENT.md)
@@ -164,10 +151,6 @@ Content-Type: application/json
 ## 验证
 
 ```bash
-cd backend
-go test ./...
-
-cd ../frontend
-npm run lint
-npm run build
+cd backend && go test ./...
+cd ../frontend && npm run lint && npm run build
 ```

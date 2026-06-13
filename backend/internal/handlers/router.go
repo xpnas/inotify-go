@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"io"
+	"io/fs"
 	"net/http"
 	"strings"
 
@@ -42,20 +44,60 @@ func (s *Server) noRoute(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "not found"})
 		return
 	}
+
+	// 32-hex send key shortcut (e.g. /KEY/title/body)
 	parts := strings.Split(path, "/")
 	if c.Request.Method == http.MethodGet && len(parts) >= 2 {
 		key := parts[0]
-		title := parts[1]
-		body := ""
-		if len(parts) >= 3 {
-			body = parts[2]
-		}
-		if s.Sender.Send("", key, title, body, Param(c, "url"), Param(c, "group"), Param(c, "sound")) {
-			OK(c, true)
+		if len(key) == 32 && isHexString(key) {
+			title := parts[1]
+			body := ""
+			if len(parts) >= 3 {
+				body = parts[2]
+			}
+			if s.Sender.Send("", key, title, body, Param(c, "url"), Param(c, "group"), Param(c, "sound")) {
+				OK(c, true)
+				return
+			}
+			Error(c, "发送失败")
 			return
 		}
-		Error(c, "发送失败")
+	}
+
+	// Serve embedded frontend (SPA fallback to index.html)
+	if s.UIRoot != nil {
+		serveUI(c, s.UIRoot)
 		return
 	}
+
 	c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "not found", "role": auth.RoleUser})
+}
+
+func serveUI(c *gin.Context, root fs.FS) {
+	urlPath := strings.TrimLeft(c.Request.URL.Path, "/")
+	f, err := root.Open(urlPath)
+	if err == nil {
+		f.Close()
+		http.FileServer(http.FS(root)).ServeHTTP(c.Writer, c.Request)
+		return
+	}
+	// SPA fallback
+	index, err := root.Open("index.html")
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	defer index.Close()
+	stat, _ := index.Stat()
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	http.ServeContent(c.Writer, c.Request, "index.html", stat.ModTime(), index.(io.ReadSeeker))
+}
+
+func isHexString(s string) bool {
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
 }

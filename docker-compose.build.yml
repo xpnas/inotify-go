@@ -1,6 +1,9 @@
 services:
   inotify:
-    image: ghcr.io/xpnas/inotify-go:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: inotify:local
     restart: unless-stopped
     environment:
       INOTIFY_ADDR: ":8000"
