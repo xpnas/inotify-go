@@ -16,6 +16,12 @@ export const menuRoutes = [
         meta: { title: '消息验证', roles: ['User', 'System'] }
       },
       {
+        path: '/settingpro/barkbind',
+        name: 'BarkBind',
+        component: () => import('@/views/BarkBind.vue'),
+        meta: { title: 'Bark绑定', roles: ['User', 'System'] }
+      },
+      {
         path: '/settingpro/sendmethods',
         name: 'SendAuths',
         component: () => import('@/views/SendAuths.vue'),
@@ -55,7 +61,7 @@ export const menuRoutes = [
         path: '/settingsys/systemglobal',
         name: 'Global',
         component: () => import('@/views/settings/Global.vue'),
-        meta: { title: '全局参数', roles: ['System'] }
+        meta: { title: '系统管理', roles: ['System'] }
       }
     ]
   }

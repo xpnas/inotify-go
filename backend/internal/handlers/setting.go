@@ -1,9 +1,15 @@
 package handlers
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +21,9 @@ import (
 )
 
 func (s *Server) RegisterSetting(r gin.IRouter) {
+	r.GET("/setting/BindWeixinCallback", s.bindWeixinCallback)
+	r.GET("/setting/bindWeixinCallback", s.bindWeixinCallback)
+
 	g := r.Group("/setting", s.Auth(auth.RoleSystem, auth.RoleUser))
 	g.GET("", s.settingIndex)
 	g.GET("/", s.settingIndex)
@@ -33,6 +42,8 @@ func (s *Server) RegisterSetting(r gin.IRouter) {
 	g.POST("/addSendAuth", s.addSendAuth)
 	g.POST("/ModifySendAuth", s.modifySendAuth)
 	g.POST("/modifySendAuth", s.modifySendAuth)
+	g.GET("/GetWeixinBindUrl", s.getWeixinBindURL)
+	g.GET("/getWeixinBindUrl", s.getWeixinBindURL)
 }
 
 func (s *Server) getMessageHistories(c *gin.Context) {
@@ -255,6 +266,227 @@ func (s *Server) reSendKey(c *gin.Context) {
 		return
 	}
 	OK(c, item.Key)
+}
+
+func (s *Server) getWeixinBindURL(c *gin.Context) {
+	const weixinScanTemplateID = "B1E7D9D4-2A9C-4B5A-8E53-65CC6D8C1F20"
+
+	user, err := s.Store.GetUser(auth.CurrentUser(c))
+	if err != nil {
+		Error(c, err.Error())
+		return
+	}
+	sendAuthID := ParamInt(c, "sendAuthId")
+	if sendAuthID <= 0 {
+		Error(c, "sendAuthId is required")
+		return
+	}
+	var item models.SendAuthInfo
+	if err := s.Store.DB.First(&item, "id = ? AND userId = ?", sendAuthID, user.ID).Error; err != nil {
+		Error(c, "发送配置不存在")
+		return
+	}
+	if item.TemplateID != weixinScanTemplateID && item.TemplateID != "409A30D5-ABE8-4A28-BADD-D04B9908D763" {
+		Error(c, "该通道不是企业微信扫码绑定模板")
+		return
+	}
+
+	corpID := strings.TrimSpace(s.Store.GetSystemValue("weixinCorpId"))
+	agentID := strings.TrimSpace(s.Store.GetSystemValue("weixinAgentId"))
+	redirectURI := strings.TrimSpace(Param(c, "redirectUri"))
+	if corpID == "" || agentID == "" {
+		Error(c, "请先在系统管理-企业微信扫码绑定配置中填写 CorpID 和 AgentID")
+		return
+	}
+	if redirectURI == "" {
+		Error(c, "redirectUri is required")
+		return
+	}
+	redirectURI = strings.TrimRight(redirectURI, "/") + "/api/setting/BindWeixinCallback"
+	state := s.signWeixinBindState(sendAuthID, user.ID, time.Now().Add(10*time.Minute).Unix())
+
+	u := url.URL{Scheme: "https", Host: "open.weixin.qq.com", Path: "/connect/oauth2/authorize"}
+	q := u.Query()
+	q.Set("appid", corpID)
+	q.Set("redirect_uri", redirectURI)
+	q.Set("response_type", "code")
+	q.Set("scope", "snsapi_base")
+	q.Set("agentid", agentID)
+	q.Set("state", state)
+	u.RawQuery = q.Encode()
+	OK(c, u.String()+"#wechat_redirect")
+}
+
+func (s *Server) bindWeixinCallback(c *gin.Context) {
+	const (
+		weixinTemplateID     = "409A30D5-ABE8-4A28-BADD-D04B9908D763"
+		weixinScanTemplateID = "B1E7D9D4-2A9C-4B5A-8E53-65CC6D8C1F20"
+	)
+
+	code := strings.TrimSpace(Param(c, "code"))
+	state := strings.TrimSpace(Param(c, "state"))
+	if code == "" {
+		s.renderWeixinBindPage(c, false, "缺少 code 参数，请重新扫码")
+		return
+	}
+	sendAuthID, userID, ok := s.parseWeixinBindState(state)
+	if !ok {
+		s.renderWeixinBindPage(c, false, "绑定链接无效或已过期，请重新生成二维码")
+		return
+	}
+
+	corpID := strings.TrimSpace(s.Store.GetSystemValue("weixinCorpId"))
+	secret := strings.TrimSpace(s.Store.GetSystemValue("weixinCorpSecret"))
+	agentID := strings.TrimSpace(s.Store.GetSystemValue("weixinAgentId"))
+	if corpID == "" || secret == "" || agentID == "" {
+		s.renderWeixinBindPage(c, false, "系统未配置企业微信参数，请联系管理员")
+		return
+	}
+
+	var item models.SendAuthInfo
+	if err := s.Store.DB.First(&item, "id = ? AND userId = ?", sendAuthID, userID).Error; err != nil {
+		s.renderWeixinBindPage(c, false, "通道不存在或无权限")
+		return
+	}
+	if item.TemplateID != weixinTemplateID && item.TemplateID != weixinScanTemplateID {
+		s.renderWeixinBindPage(c, false, "该通道不是企业微信扫码绑定模板")
+		return
+	}
+
+	accessToken, err := s.weixinAccessToken(corpID, secret)
+	if err != nil {
+		s.renderWeixinBindPage(c, false, err.Error())
+		return
+	}
+	toUser, err := s.weixinUserIDByCode(accessToken, code)
+	if err != nil {
+		s.renderWeixinBindPage(c, false, err.Error())
+		return
+	}
+	cfg, _ := json.Marshal(map[string]interface{}{
+		"Corpid":     corpID,
+		"Corpsecret": secret,
+		"AgentID":    agentID,
+		"OpengId":    toUser,
+	})
+	if strings.TrimSpace(item.Name) == "" || item.Name == "企业微信扫码绑定" {
+		item.Name = "企业微信-" + toUser
+	}
+	item.TemplateID = weixinTemplateID
+	item.Config = string(cfg)
+	item.Active = true
+	if err := s.Store.DB.Save(&item).Error; err != nil {
+		s.renderWeixinBindPage(c, false, "保存绑定结果失败")
+		return
+	}
+
+	s.renderWeixinBindPage(c, true, "绑定成功："+toUser+"，可返回 Inotify 刷新页面")
+}
+
+func (s *Server) weixinAccessToken(corpID, secret string) (string, error) {
+	api := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=%s&corpsecret=%s", url.QueryEscape(corpID), url.QueryEscape(secret))
+	resp, err := http.Get(api)
+	if err != nil || resp == nil {
+		return "", fmt.Errorf("获取企业微信 access token 失败")
+	}
+	defer resp.Body.Close()
+	var body struct {
+		AccessToken string `json:"access_token"`
+		ErrCode     int    `json:"errcode"`
+		ErrMsg      string `json:"errmsg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", fmt.Errorf("解析企业微信 token 响应失败")
+	}
+	if body.ErrCode != 0 || body.AccessToken == "" {
+		if body.ErrMsg == "" {
+			body.ErrMsg = "unknown error"
+		}
+		return "", fmt.Errorf("企业微信 token 错误: %s", body.ErrMsg)
+	}
+	return body.AccessToken, nil
+}
+
+func (s *Server) weixinUserIDByCode(accessToken, code string) (string, error) {
+	api := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/user/getuserinfo?access_token=%s&code=%s", url.QueryEscape(accessToken), url.QueryEscape(code))
+	resp, err := http.Get(api)
+	if err != nil || resp == nil {
+		return "", fmt.Errorf("获取企业微信用户信息失败")
+	}
+	defer resp.Body.Close()
+	var body struct {
+		UserID  string `json:"UserId"`
+		OpenID  string `json:"OpenId"`
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", fmt.Errorf("解析企业微信用户响应失败")
+	}
+	if body.ErrCode != 0 {
+		if body.ErrMsg == "" {
+			body.ErrMsg = "unknown error"
+		}
+		return "", fmt.Errorf("企业微信换取用户失败: %s", body.ErrMsg)
+	}
+	if body.UserID != "" {
+		return body.UserID, nil
+	}
+	if body.OpenID != "" {
+		return body.OpenID, nil
+	}
+	return "", fmt.Errorf("企业微信返回空用户标识")
+}
+
+func (s *Server) signWeixinBindState(sendAuthID, userID int, expireAt int64) string {
+	payload := fmt.Sprintf("%d:%d:%d", sendAuthID, userID, expireAt)
+	key := []byte(s.Store.JWTInfo.IssuerSigningKey)
+	if len(key) == 0 {
+		key = []byte("inotify")
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(payload))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return payload + ":" + sig
+}
+
+func (s *Server) parseWeixinBindState(raw string) (int, int, bool) {
+	parts := strings.Split(raw, ":")
+	if len(parts) != 4 {
+		return 0, 0, false
+	}
+	sendAuthID, err1 := strconv.Atoi(parts[0])
+	userID, err2 := strconv.Atoi(parts[1])
+	expireAt, err3 := strconv.ParseInt(parts[2], 10, 64)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return 0, 0, false
+	}
+	if time.Now().Unix() > expireAt {
+		return 0, 0, false
+	}
+	payload := strings.Join(parts[:3], ":")
+	key := []byte(s.Store.JWTInfo.IssuerSigningKey)
+	if len(key) == 0 {
+		key = []byte("inotify")
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(payload))
+	expect := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(expect), []byte(parts[3])) {
+		return 0, 0, false
+	}
+	return sendAuthID, userID, true
+}
+
+func (s *Server) renderWeixinBindPage(c *gin.Context, ok bool, msg string) {
+	status := "失败"
+	color := "#ef4444"
+	if ok {
+		status = "成功"
+		color = "#16a34a"
+	}
+	html := fmt.Sprintf(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>企业微信扫码绑定</title></head><body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:24px;"><div style="max-width:560px;margin:40px auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;"><h2 style="margin:0 0 12px;color:%s;">企业微信扫码绑定%s</h2><p style="margin:0;color:#334155;line-height:1.7;">%s</p><p style="margin:14px 0 0;color:#64748b;">可关闭当前页面，返回 Inotify 刷新通道列表。</p></div></body></html>`, color, status, msg)
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
 
 func parseSendAuthRequest(c *gin.Context) sendAuthRequest {

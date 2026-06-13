@@ -23,3 +23,11 @@ export function getGithubEnable() {
 export function githubLogin(code) {
   return request({ url: '/oauth/githublogin', method: 'get', params: { code } })
 }
+
+export function getWeixinQrEnable() {
+  return request({ url: '/oauth/WeixinQrEnable', method: 'get' })
+}
+
+export function weixinQrLogin(params) {
+  return request({ url: '/oauth/WeixinQrLogin', method: 'get', params })
+}

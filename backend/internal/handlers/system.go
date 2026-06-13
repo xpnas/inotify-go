@@ -35,6 +35,9 @@ func (s *Server) getGlobal(c *gin.Context) {
 	OK(c, gin.H{
 		"githubClientId":     s.Store.GetSystemValue("githubClientId"),
 		"githubClientSecret": s.Store.GetSystemValue("githubClientSecret"),
+		"weixinCorpId":       s.Store.GetSystemValue("weixinCorpId"),
+		"weixinCorpSecret":   s.Store.GetSystemValue("weixinCorpSecret"),
+		"weixinAgentId":      s.Store.GetSystemValue("weixinAgentId"),
 		"proxyAddress":       s.Store.GetSystemValue("proxyAddress"),
 		"administrators":     s.Store.GetSystemValue("administrators"),
 		"adminUserName":      s.Store.GetSystemValue("adminUserName"),
@@ -42,7 +45,7 @@ func (s *Server) getGlobal(c *gin.Context) {
 }
 
 func (s *Server) setGlobal(c *gin.Context) {
-	keys := []string{"githubClientId", "githubClientSecret", "proxyAddress", "administrators", "adminUserName"}
+	keys := []string{"githubClientId", "githubClientSecret", "weixinCorpId", "weixinCorpSecret", "weixinAgentId", "proxyAddress", "administrators", "adminUserName"}
 	for _, key := range keys {
 		if value := Param(c, key); value != "" {
 			if err := s.Store.SetSystemValue(key, value); err != nil {

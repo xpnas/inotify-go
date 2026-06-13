@@ -1,8 +1,17 @@
 <template>
   <div class="shell">
     <aside class="sidebar">
-      <div class="brand">Inotify</div>
-      <el-menu :default-active="$route.path" router>
+      <div class="brand">
+        <span class="brand-icon">{{ brand.icon }}</span>
+        {{ brand.name }}
+      </div>
+      <el-menu
+        :default-active="$route.path"
+        router
+        background-color="transparent"
+        text-color="rgba(255,255,255,0.75)"
+        active-text-color="#ffffff"
+      >
         <el-menu-item
           v-for="item in visibleMenu"
           :key="item.path"
@@ -12,9 +21,6 @@
           <span>{{ item.title }}</span>
         </el-menu-item>
       </el-menu>
-      <a class="source-link" href="https://github.com/xpnas/Inotify" target="_blank" rel="noreferrer">
-        源码
-      </a>
     </aside>
     <main class="main">
       <header class="topbar">
@@ -24,9 +30,9 @@
         </div>
         <el-dropdown trigger="click" @command="handleCommand">
           <button class="user-button">
-            <el-avatar :size="32" :src="auth.avatar">{{ avatarText }}</el-avatar>
+            <el-avatar :size="30" :src="auth.avatar">{{ avatarText }}</el-avatar>
             <span>{{ auth.name || '用户' }}</span>
-            <el-tag size="small" effect="plain">{{ auth.role || 'Role' }}</el-tag>
+            <el-tag size="small" effect="plain" type="success">{{ auth.role || 'Role' }}</el-tag>
           </button>
           <template #dropdown>
             <el-dropdown-menu>
@@ -58,12 +64,14 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { menuRoutes } from '@/router'
 import { useAuthStore } from '@/stores/auth'
+import { useBrandStore } from '@/stores/brand'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const brand = useBrandStore()
 
-const icons = [Key, Bell, Clock, Lock, Monitor, User, Setting, Link]
+const icons = [Key, Link, Bell, Clock, Lock, Monitor, User, Setting]
 
 const visibleMenu = computed(() => {
   const children = menuRoutes[0].children

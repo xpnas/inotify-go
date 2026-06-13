@@ -35,3 +35,7 @@ export function deleteSendAuth(sendAuthId) {
 export function reSendKey(sendAuthId) {
   return request({ url: '/setting/reSendKey', method: 'get', params: { sendAuthId } })
 }
+
+export function getWeixinBindUrl(sendAuthId, redirectUri) {
+  return request({ url: '/setting/GetWeixinBindUrl', method: 'get', params: { sendAuthId, redirectUri } })
+}

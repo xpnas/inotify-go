@@ -45,6 +45,27 @@
         <el-form-item label="名称">
           <el-input v-model="form.name" />
         </el-form-item>
+        <template v-if="isWeixinScanTemplate">
+          <el-form-item label="绑定方式">
+            <div class="stack" style="width:100%;gap:10px;">
+              <el-alert
+                type="info"
+                :closable="false"
+                title="扫码后自动绑定到当前通道"
+                description="若提示未配置，请先到 系统管理 > 企业微信扫码绑定配置，填写 CorpID / Secret / AgentID。"
+              />
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <el-button type="primary" :loading="bindLoading" @click="buildWeixinBindQr">生成二维码</el-button>
+                <el-button @click="load">扫码后刷新列表</el-button>
+                <span v-if="form.config.OpengId" class="muted">已绑定用户：{{ form.config.OpengId }}</span>
+              </div>
+              <div v-if="bindQr" class="qr-box" style="width:240px;min-height:240px;">
+                <img :src="bindQr" alt="企业微信扫码绑定二维码" style="width:220px;height:220px;" />
+              </div>
+              <span v-if="bindHint" class="muted">{{ bindHint }}</span>
+            </div>
+          </el-form-item>
+        </template>
         <el-form-item
           v-for="field in selectedInputs"
           :key="field.key"
@@ -64,6 +85,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import QRCode from 'qrcode'
 
 import {
   activeSendAuth,
@@ -71,19 +93,26 @@ import {
   deleteSendAuth,
   getSendAuths,
   getSendTemplates,
+  getWeixinBindUrl,
   modifySendAuth,
   reSendKey
 } from '@/api/setting'
+
+const WEIXIN_SCAN_TEMPLATE_ID = 'B1E7D9D4-2A9C-4B5A-8E53-65CC6D8C1F20'
 
 const auths = ref([])
 const templates = ref([])
 const dialogVisible = ref(false)
 const saving = ref(false)
+const bindLoading = ref(false)
+const bindQr = ref('')
+const bindHint = ref('')
 const editing = ref(null)
 const form = reactive({ id: 0, templateID: '', name: '', config: {} })
 
 const selectedTemplate = computed(() => templates.value.find((item) => item.key === form.templateID))
 const selectedInputs = computed(() => selectedTemplate.value?.inputs || [])
+const isWeixinScanTemplate = computed(() => form.templateID === WEIXIN_SCAN_TEMPLATE_ID)
 
 onMounted(load)
 
@@ -99,6 +128,8 @@ function openCreate() {
   form.templateID = templates.value[0]?.key || ''
   form.name = templates.value[0]?.name || ''
   form.config = {}
+  bindQr.value = ''
+  bindHint.value = ''
   syncFields()
   dialogVisible.value = true
 }
@@ -113,12 +144,18 @@ function openEdit(row) {
   } catch {
     form.config = {}
   }
+  bindQr.value = ''
+  bindHint.value = row.templateID === WEIXIN_SCAN_TEMPLATE_ID && row.config
+    ? '若已扫码成功，请刷新列表查看绑定后的企业微信通道。'
+    : ''
   syncFields()
   dialogVisible.value = true
 }
 
 function handleTemplateChange() {
   if (selectedTemplate.value) form.name = selectedTemplate.value.name
+  bindQr.value = ''
+  bindHint.value = ''
   syncFields()
 }
 
@@ -139,13 +176,51 @@ async function save() {
       config: form.config,
       active: editing.value?.active ?? true
     }
-    if (editing.value) await modifySendAuth(payload)
+    if (editing.value || form.id > 0) await modifySendAuth(payload)
     else await addSendAuth(payload)
     ElMessage.success('已保存')
     dialogVisible.value = false
     await load()
   } finally {
     saving.value = false
+  }
+}
+
+async function ensureWeixinScanAuthExists() {
+  if (form.id > 0) {
+    return form.id
+  }
+  const payload = {
+    templateID: WEIXIN_SCAN_TEMPLATE_ID,
+    name: form.name || '企业微信扫码绑定',
+    config: {},
+    active: true
+  }
+  const created = await addSendAuth(payload)
+  form.id = created.id
+  editing.value = created
+  await load()
+  return created.id
+}
+
+async function buildWeixinBindQr() {
+  bindLoading.value = true
+  bindQr.value = ''
+  bindHint.value = ''
+  try {
+    if (!isWeixinScanTemplate.value) {
+      ElMessage.warning('请先选择“企业微信扫码绑定”模板')
+      return
+    }
+    const sendAuthId = await ensureWeixinScanAuthExists()
+    const bindUrl = await getWeixinBindUrl(sendAuthId, window.location.origin)
+    bindQr.value = await QRCode.toDataURL(bindUrl, { width: 220, margin: 1 })
+    bindHint.value = '请使用企业微信扫码并授权。授权成功后，页面会显示成功提示，随后返回本页点击“刷新列表”。'
+  } catch (error) {
+    const msg = error?.message || '生成二维码失败'
+    bindHint.value = msg
+  } finally {
+    bindLoading.value = false
   }
 }
 

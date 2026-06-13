@@ -164,12 +164,14 @@ func (s *Service) sendOne(authInfo models.SendAuthInfo, msg Message) bool {
 		return s.sendDingtalk(cfg, msg)
 	case strings.ToLower("C01A08B4-3A71-452B-9D4B-D8EC7EF1D68F"), strings.ToLower("FEISHU"):
 		return s.sendFeishu(cfg, msg)
-	case strings.ToLower("409A30D5-ABE8-4A28-BADD-D04B9908D763"), strings.ToLower("WEIXIN"):
+	case strings.ToLower("409A30D5-ABE8-4A28-BADD-D04B9908D763"), strings.ToLower("B1E7D9D4-2A9C-4B5A-8E53-65CC6D8C1F20"), strings.ToLower("WEIXIN"):
 		return s.sendWeixin(cfg, msg)
 	case strings.ToLower("EA2B43F7-956C-4C01-B583-0C943ABB36C3"), strings.ToLower("EMAIL"):
 		return s.sendEmail(cfg, msg)
 	case strings.ToLower("3B6DE04D-A9EF-4C91-A151-60B7425C5AB2"), strings.ToLower("BARK"):
 		return s.sendBark(cfg, msg)
+	case strings.ToLower("F1A2B3C4-D5E6-7890-ABCD-EF1234567890"), strings.ToLower("WXPUSHER"):
+		return s.sendWxPusher(cfg, msg)
 	default:
 		return s.sendByKnownFields(cfg, msg)
 	}
@@ -207,8 +209,20 @@ func (s *Service) sendTelegram(cfg map[string]string, msg Message) bool {
 	if token == "" || chatID == "" {
 		return false
 	}
+	if msg.URL != "" && isImageURL(msg.URL) {
+		api := fmt.Sprintf("%s/bot%s/sendPhoto", s.telegramBase, token)
+		caption := msg.Title
+		if msg.Body != "" {
+			caption += "\n" + msg.Body
+		}
+		return s.postForm(api, url.Values{"chat_id": {chatID}, "photo": {msg.URL}, "caption": {caption}})
+	}
+	text := msg.Title + "\n" + msg.Body
+	if msg.URL != "" {
+		text += "\n" + msg.URL
+	}
 	api := fmt.Sprintf("%s/bot%s/sendMessage", s.telegramBase, token)
-	return s.postForm(api, url.Values{"chat_id": {chatID}, "text": {msg.Title + "\n" + msg.Body}})
+	return s.postForm(api, url.Values{"chat_id": {chatID}, "text": {text}})
 }
 
 func (s *Service) sendDingtalk(cfg map[string]string, msg Message) bool {
@@ -249,10 +263,46 @@ func (s *Service) sendFeishu(cfg map[string]string, msg Message) bool {
 	return s.sendWebhook(webhook, payload)
 }
 
+func weixinNewsPayload(extra map[string]interface{}, title, body, link string) map[string]interface{} {
+	article := map[string]string{
+		"title":       title,
+		"description": body,
+		"url":         link,
+	}
+	if isImageURL(link) {
+		article["picurl"] = link
+	}
+	payload := map[string]interface{}{
+		"msgtype": "news",
+		"news":    map[string]interface{}{"articles": []interface{}{article}},
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	return payload
+}
+
 func (s *Service) sendWeixin(cfg map[string]string, msg Message) bool {
+	imageURL := preferredImageURL(msg)
+	desc := strings.TrimSpace(msg.Body)
+	if desc == imageURL {
+		desc = ""
+	}
+
 	webhook := first(cfg, "WebHook", "Webhook", "url")
 	if webhook != "" {
-		return s.sendWebhook(webhook, map[string]interface{}{"msgtype": "text", "text": map[string]string{"content": msg.Title + "\n" + msg.Body}})
+		var payload map[string]interface{}
+		if imageURL != "" {
+			payload = weixinNewsPayload(nil, msg.Title, desc, imageURL)
+		} else if msg.URL != "" {
+			payload = weixinNewsPayload(nil, msg.Title, msg.Body, msg.URL)
+		} else {
+			payload = map[string]interface{}{
+				"msgtype": "text",
+				"text":    map[string]string{"content": msg.Title + "\n" + msg.Body},
+			}
+		}
+		return s.sendWebhook(webhook, payload)
 	}
 	corpID := first(cfg, "Corpid", "CorpId", "corpId")
 	secret := first(cfg, "Corpsecret", "CorpSecret", "Secret")
@@ -268,15 +318,58 @@ func (s *Service) sendWeixin(cfg map[string]string, msg Message) bool {
 	if !ok {
 		return false
 	}
-	payload := map[string]interface{}{
-		"touser":  toUser,
-		"msgtype": "text",
-		"agentid": agentID,
-		"text":    map[string]string{"content": msg.Title + "\n" + msg.Body},
-		"safe":    0,
+	var payload map[string]interface{}
+	if imageURL != "" {
+		payload = weixinNewsPayload(map[string]interface{}{
+			"touser":  toUser,
+			"agentid": agentID,
+		}, msg.Title, desc, imageURL)
+	} else if msg.URL != "" {
+		payload = weixinNewsPayload(map[string]interface{}{
+			"touser":  toUser,
+			"agentid": agentID,
+		}, msg.Title, msg.Body, msg.URL)
+	} else {
+		payload = map[string]interface{}{
+			"touser":  toUser,
+			"msgtype": "text",
+			"agentid": agentID,
+			"text":    map[string]string{"content": msg.Title + "\n" + msg.Body},
+			"safe":    0,
+		}
 	}
 	api := fmt.Sprintf("%s/cgi-bin/message/send?access_token=%s", s.weixinBase, url.QueryEscape(token))
 	return s.postJSON(api, payload)
+}
+
+func preferredImageURL(msg Message) string {
+	if candidate := extractImageURL(msg.URL); candidate != "" {
+		return candidate
+	}
+	return extractImageURL(msg.Body)
+}
+
+func extractImageURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	if isHTTPURL(value) && isImageURL(value) {
+		return value
+	}
+	fields := strings.Fields(value)
+	if len(fields) > 0 {
+		first := strings.TrimSpace(fields[0])
+		if isHTTPURL(first) && isImageURL(first) {
+			return first
+		}
+	}
+	return ""
+}
+
+func isHTTPURL(raw string) bool {
+	lower := strings.ToLower(strings.TrimSpace(raw))
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
 func (s *Service) sendEmail(cfg map[string]string, msg Message) bool {
@@ -287,7 +380,7 @@ func (s *Service) sendEmail(cfg map[string]string, msg Message) bool {
 	if host == "" || user == "" || to == "" {
 		return false
 	}
-	port := 25
+	port := 465
 	fmt.Sscanf(first(cfg, "Port"), "%d", &port)
 	m := gomail.NewMessage()
 	fromName := first(cfg, "FromName")
@@ -299,7 +392,70 @@ func (s *Service) sendEmail(cfg map[string]string, msg Message) bool {
 	m.SetHeader("To", to)
 	m.SetHeader("Subject", msg.Title)
 	m.SetBody("text/plain", msg.Body)
-	return gomail.NewDialer(host, port, user, pass).DialAndSend(m) == nil
+	d := gomail.NewDialer(host, port, user, pass)
+	// gomail 默认对 465/993 端口启用 SSL，其余端口用 STARTTLS。
+	// EnableSSL 字段允许用户显式覆盖，兼容 163 等要求强制 SSL 的服务商。
+	sslVal := strings.ToLower(strings.TrimSpace(first(cfg, "EnableSSL", "SSL", "Ssl")))
+	if sslVal == "true" || sslVal == "1" {
+		d.SSL = true
+	} else if sslVal == "false" || sslVal == "0" {
+		d.SSL = false
+	}
+	return d.DialAndSend(m) == nil
+}
+
+func (s *Service) sendWxPusher(cfg map[string]string, msg Message) bool {
+	content := msg.Title
+	if msg.Body != "" {
+		content += "\n" + msg.Body
+	}
+	// 极简推送（SPT 模式）
+	if spt := first(cfg, "SPT", "Spt"); spt != "" {
+		payload := map[string]interface{}{
+			"content":     content,
+			"summary":     msg.Title,
+			"contentType": 1,
+			"spt":         spt,
+		}
+		if msg.URL != "" {
+			payload["url"] = msg.URL
+		}
+		return s.postWxPusher("https://wxpusher.zjiecode.com/api/send/message/simple-push", payload)
+	}
+	// 标准推送（AppToken + UID 模式）
+	appToken := first(cfg, "AppToken", "appToken")
+	uid := first(cfg, "UID", "Uid", "uid")
+	if appToken == "" || uid == "" {
+		return false
+	}
+	payload := map[string]interface{}{
+		"appToken":    appToken,
+		"content":     content,
+		"summary":     msg.Title,
+		"contentType": 1,
+		"uids":        []string{uid},
+	}
+	if msg.URL != "" {
+		payload["url"] = msg.URL
+	}
+	return s.postWxPusher("https://wxpusher.zjiecode.com/api/send/message", payload)
+}
+
+func (s *Service) postWxPusher(apiURL string, payload interface{}) bool {
+	data, _ := json.Marshal(payload)
+	resp, err := s.client.Post(apiURL, "application/json", bytes.NewReader(data))
+	if err != nil || resp == nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Success bool `json:"success"`
+		Code    int  `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false
+	}
+	return result.Success && result.Code == 1000
 }
 
 func (s *Service) sendBark(cfg map[string]string, msg Message) bool {
@@ -435,14 +591,26 @@ func decodeConfig(raw string) (map[string]string, error) {
 func templates() []Template {
 	return []Template{
 		{ID: "409A30D5-ABE8-4A28-BADD-D04B9908D763", Name: "企业微信", Order: 0, Inputs: []Input{{0, "Corpid", "Corpid", "企业ID"}, {1, "Corpsecret", "Corpsecret", "密钥"}, {2, "AgentID", "AgentID", "应用ID"}, {3, "OpengId", "OpengId", "@all"}}},
+		{ID: "B1E7D9D4-2A9C-4B5A-8E53-65CC6D8C1F20", Name: "企业微信扫码绑定", Order: 1, Inputs: []Input{}},
 		{ID: "EA2B43F7-956C-4C01-B583-0C943ABB36C3", Name: "邮件推送", Order: 1, Inputs: []Input{{0, "FromName", "FromName", "管理员"}, {1, "From", "From", "abc@qq.com"}, {2, "Password", "Password", "123456"}, {3, "Host", "Host", "smtp.qq.com"}, {4, "Port", "Port", "587"}, {5, "EnableSSL", "EnableSSL", "true|false"}, {6, "To", "To", "abcd@qq.com"}}},
 		{ID: "E9669473-FF0B-4474-92BB-E939D92045BB", Name: "电报机器人", Order: 2, Inputs: []Input{{0, "BotToken", "BotToken", "ID:Token"}, {1, "Chat_id", "ChatId", "ChatId"}}},
 		{ID: "ADB11045-F2C8-457E-BF7E-1698AD37ED53", Name: "自定义GET", Order: 4, Inputs: []Input{{0, "URL", "URL", "https://api.day.app/token/{title}/{data}"}}},
 		{ID: "A3C1E614-717E-4CF1-BA9B-7242717FC037", Name: "自定义POST", Order: 5, Inputs: []Input{{0, "URL", "URL", "https://api.day.app/token/{title}/{data}"}, {1, "Encoding", "Encoding", "utf-8"}, {1, "ContentType", "ContentType", "application/json"}, {2, "Data", "Data", `{"msgid":"123456","title":"{title}","data":"{data}"}`}}},
 		{ID: "048297D4-D975-48F6-9A91-8B4EF75805C1", Name: "钉钉群机器人", Order: 21, Inputs: []Input{{0, "WebHook", "WebHook", "https://oapi.dingtalk.com/robot/send?access_token=xxxxx"}, {0, "Secret", "Secret", "SEC77xxxx"}}},
 		{ID: "C01A08B4-3A71-452B-9D4B-D8EC7EF1D68F", Name: "飞书群机器人", Order: 22, Inputs: []Input{{0, "WebHook", "WebHook", "https://open.feishu.cn/open-apis/bot/v2/hook/xxxxx"}, {0, "Secret", "Secret", "VcgAbeuZOhTZPSP0zxxxx"}}},
+		{ID: "F1A2B3C4-D5E6-7890-ABCD-EF1234567890", Name: "WxPusher", Order: 23, Inputs: []Input{{0, "AppToken", "AppToken", "AT_xxx（标准推送）"}, {1, "UID", "UID", "UID_xxx（标准推送）"}, {2, "SPT", "SPT", "SPT_xxx（极简推送，填此项则忽略上面两项）"}}},
 		{ID: "3B6DE04D-A9EF-4C91-A151-60B7425C5AB2", Name: "Bark", Order: 2999, Inputs: []Input{{1, "Sound", "Sound", "1107"}, {2, "IsArchive", "IsArchive", "1或0"}, {3, "AutoMaticallyCopy", "AutoMaticallyCopy", "1或0"}, {4, "DeviceKey", "DeviceKey", "DeviceKey"}, {5, "DeviceToken", "DeviceToken", "DeviceToken"}, {6, "SendUrl", "SendUrl", "SendUrl"}}},
 	}
+}
+
+func isImageURL(u string) bool {
+	lower := strings.ToLower(u)
+	for _, ext := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"} {
+		if strings.Contains(lower, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 func applyTemplate(raw string, msg Message) string {
