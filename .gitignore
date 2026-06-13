@@ -43,6 +43,9 @@ node_modules/
 **/node_modules/
 dist/
 **/dist/
+# Keep the embed placeholder so go:embed compiles in CI
+!backend/cmd/inotify/ui/dist/
+!backend/cmd/inotify/ui/dist/.gitkeep
 coverage/
 **/coverage/
 .vite/
@@ -50,19 +53,6 @@ coverage/
 
 # Docker / local compose overrides
 docker-compose.override.yml
-
-# Documentation and AI-related files
-docs/
-.ai/
-.aider*
-.copilot/
-.cursor/
-.claude/
-AGENTS.md
-copilot-instructions.md
-*.prompt.md
-*.instructions.md
-*.agent.md
 
 # Archives and generated bundles
 *.zip
