@@ -97,7 +97,7 @@ onMounted(async () => {
   if (code) {
     githubLoading.value = true
     try {
-      const data = await githubLogin(code)
+      const data = await githubLogin({ code, redirectUri: `${window.location.origin}/login` })
       auth.acceptLogin(data)
       router.push('/')
     } finally {
@@ -121,7 +121,7 @@ async function submit() {
 async function loginWithGithub() {
   githubLoading.value = true
   try {
-    const url = await githubLogin('')
+    const url = await githubLogin({ redirectUri: `${window.location.origin}/login` })
     window.location.href = url
   } finally {
     githubLoading.value = false

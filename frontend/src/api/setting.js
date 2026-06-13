@@ -24,6 +24,10 @@ export function modifySendAuth(data) {
   return request({ url: '/setting/ModifySendAuth', method: 'post', data })
 }
 
+export function testSendAuth(data) {
+  return request({ url: '/setting/TestSendAuth', method: 'post', data })
+}
+
 export function activeSendAuth(sendAuthId, state) {
   return request({ url: '/setting/ActiveSendAuth', method: 'post', params: { sendAuthId, state } })
 }

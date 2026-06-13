@@ -41,8 +41,8 @@ export const useAuthStore = defineStore('auth', {
       this.email = data.email || ''
       localStorage.setItem(TOKEN_KEY, data.token)
     },
-    async githubLogin(code) {
-      const data = await githubLogin(code)
+    async githubLogin(params) {
+      const data = await githubLogin(params)
       this.acceptLogin(data)
       return data
     },

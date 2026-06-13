@@ -21,6 +21,7 @@ type SenderService interface {
 	Templates() []map[string]interface{}
 	SendAuthTemplates() map[string]interface{}
 	Send(token, key, title, body, url, group, sound string) bool
+	TestSendAuth(authInfo models.SendAuthInfo, title, body string) bool
 }
 
 func OK(c *gin.Context, data interface{}) {
@@ -46,6 +47,13 @@ func Param(c *gin.Context, key string) string {
 		return v
 	}
 	return c.PostForm(key)
+}
+
+func ParamValue(c *gin.Context, key string) (string, bool) {
+	if v, ok := c.GetQuery(key); ok {
+		return v, true
+	}
+	return c.GetPostForm(key)
 }
 
 func ParamInt(c *gin.Context, key string) int {

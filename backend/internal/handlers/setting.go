@@ -42,6 +42,8 @@ func (s *Server) RegisterSetting(r gin.IRouter) {
 	g.POST("/addSendAuth", s.addSendAuth)
 	g.POST("/ModifySendAuth", s.modifySendAuth)
 	g.POST("/modifySendAuth", s.modifySendAuth)
+	g.POST("/TestSendAuth", s.testSendAuth)
+	g.POST("/testSendAuth", s.testSendAuth)
 	g.GET("/GetWeixinBindUrl", s.getWeixinBindURL)
 	g.GET("/getWeixinBindUrl", s.getWeixinBindURL)
 }
@@ -201,6 +203,50 @@ func (s *Server) modifySendAuth(c *gin.Context) {
 		return
 	}
 	OK(c, item)
+}
+
+func (s *Server) testSendAuth(c *gin.Context) {
+	user, err := s.Store.GetUser(auth.CurrentUser(c))
+	if err != nil {
+		Error(c, err.Error())
+		return
+	}
+	req := parseSendAuthRequest(c)
+	item := models.SendAuthInfo{
+		UserID:     user.ID,
+		TemplateID: req.TemplateID,
+		Name:       req.Name,
+		Active:     true,
+	}
+	if req.SendAuthID > 0 || req.ID > 0 {
+		id := req.SendAuthID
+		if id == 0 {
+			id = req.ID
+		}
+		if err := s.Store.DB.First(&item, "id = ? AND userId = ?", id, user.ID).Error; err != nil {
+			Error(c, "发送配置不存在")
+			return
+		}
+		if req.TemplateID != "" {
+			item.TemplateID = req.TemplateID
+		}
+		if req.Name != "" {
+			item.Name = req.Name
+		}
+	}
+	cfg, _ := json.Marshal(req.config())
+	if len(cfg) > 2 {
+		item.Config = string(cfg)
+	}
+	if item.TemplateID == "" {
+		Error(c, "templateID is required")
+		return
+	}
+	if item.Config == "" {
+		item.Config = "{}"
+	}
+	ok := s.Sender.TestSendAuth(item, "Inotify 通道测试", "这是一条来自 Inotify 的测试消息")
+	OK(c, gin.H{"success": ok})
 }
 
 func (s *Server) activeSendAuth(c *gin.Context) {

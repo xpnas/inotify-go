@@ -102,6 +102,38 @@ npm run dev
 
 前端开发服务器默认监听 `http://localhost:9000`，并把 `/api` 代理到 `http://127.0.0.1:8000`。
 
+## GitHub 登录配置
+
+在 GitHub 创建 OAuth App：
+
+```text
+GitHub Settings -> Developer settings -> OAuth Apps -> New OAuth App
+```
+
+生产环境示例：
+
+```text
+Homepage URL: https://你的域名
+Authorization callback URL: https://你的域名/login
+```
+
+本地开发示例：
+
+```text
+Homepage URL: http://localhost:9000
+Authorization callback URL: http://localhost:9000/login
+```
+
+创建完成后复制 `Client ID` 和 `Client Secret`，登录 Inotify 后台，在 `系统管理 -> 全局设置 -> GitHub 登录设置` 中填写并保存。页面会显示当前应填写到 GitHub OAuth App 的 `GitHub redirect_uri`，通常为当前站点地址加 `/login`。
+
+如果服务器访问 GitHub 较慢或受限，可以在同一页面填写 `代理地址`，例如：
+
+```text
+http://127.0.0.1:7890
+```
+
+清空 `GitHub Client ID` 或 `GitHub Client Secret` 后保存，即可关闭 GitHub 登录入口。
+
 ## 消息发送
 
 GET 示例：

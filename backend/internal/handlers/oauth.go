@@ -164,16 +164,20 @@ func (s *Server) githubLogin(c *gin.Context) {
 		return
 	}
 	code := Param(c, "code")
+	redirectURI := strings.TrimSpace(Param(c, "redirectUri"))
 	if code == "" {
 		u := url.URL{Scheme: "https", Host: "github.com", Path: "/login/oauth/authorize"}
 		q := u.Query()
 		q.Set("client_id", clientID)
 		q.Set("scope", "read:user user:email")
+		if redirectURI != "" {
+			q.Set("redirect_uri", redirectURI)
+		}
 		u.RawQuery = q.Encode()
 		OK(c, u.String())
 		return
 	}
-	ghUser, err := s.githubUser(clientID, clientSecret, code)
+	ghUser, err := s.githubUser(clientID, clientSecret, code, redirectURI)
 	if err != nil {
 		Error(c, err.Error())
 		return
@@ -254,19 +258,27 @@ type githubUserInfo struct {
 	Email  string `json:"email"`
 }
 
-func (s *Server) githubUser(clientID, clientSecret, code string) (githubUserInfo, error) {
-	payload, _ := json.Marshal(map[string]string{
+func (s *Server) githubUser(clientID, clientSecret, code, redirectURI string) (githubUserInfo, error) {
+	tokenPayload := map[string]string{
 		"client_id":     clientID,
 		"client_secret": clientSecret,
 		"code":          code,
-	})
+	}
+	if redirectURI != "" {
+		tokenPayload["redirect_uri"] = redirectURI
+	}
+	payload, _ := json.Marshal(tokenPayload)
 	req, err := http.NewRequest(http.MethodPost, "https://github.com/login/oauth/access_token", bytes.NewReader(payload))
+	if err != nil {
+		return githubUserInfo{}, err
+	}
+	client, err := s.githubHTTPClient()
 	if err != nil {
 		return githubUserInfo{}, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return githubUserInfo{}, err
 	}
@@ -291,7 +303,7 @@ func (s *Server) githubUser(clientID, clientSecret, code string) (githubUserInfo
 	}
 	req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err = http.DefaultClient.Do(req)
+	resp, err = client.Do(req)
 	if err != nil {
 		return githubUserInfo{}, err
 	}
@@ -304,6 +316,23 @@ func (s *Server) githubUser(clientID, clientSecret, code string) (githubUserInfo
 		return githubUserInfo{}, errGithub("GitHub user login is empty")
 	}
 	return user, nil
+}
+
+func (s *Server) githubHTTPClient() (*http.Client, error) {
+	proxyAddress := strings.TrimSpace(s.Store.GetSystemValue("proxyAddress"))
+	if proxyAddress == "" {
+		return &http.Client{Timeout: 15 * time.Second}, nil
+	}
+	proxyURL, err := url.Parse(proxyAddress)
+	if err != nil {
+		return nil, errGithub("GitHub proxy address is invalid: " + err.Error())
+	}
+	return &http.Client{
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+	}, nil
 }
 
 func (s *Server) upsertGithubUser(gh githubUserInfo) (*models.SendUserInfo, error) {

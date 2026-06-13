@@ -35,6 +35,9 @@
         <el-form-item label="GitHub Client Secret">
           <el-input v-model="form.githubClientSecret" show-password />
         </el-form-item>
+        <el-form-item label="GitHub redirect_uri">
+          <el-input :model-value="githubRedirectUri" readonly />
+        </el-form-item>
         <el-form-item label="代理地址">
           <el-input v-model="form.proxyAddress" placeholder="http://127.0.0.1:7890" />
           <div class="form-tip muted">通过代理访问 GitHub OAuth 接口，留空则直连。</div>
@@ -85,7 +88,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { getGlobal, setGlobal } from '@/api/system'
@@ -105,6 +108,7 @@ const form = reactive({
 
 const brand = useBrandStore()
 const brandForm = reactive({ icon: brand.icon, name: brand.name })
+const githubRedirectUri = computed(() => `${window.location.origin}/login`)
 
 onMounted(async () => {
   Object.assign(form, await getGlobal())

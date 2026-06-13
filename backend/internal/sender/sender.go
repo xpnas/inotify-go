@@ -130,6 +130,10 @@ func (s *Service) Send(token, key, title, body, link, group, sound string) bool 
 	return ok
 }
 
+func (s *Service) TestSendAuth(authInfo models.SendAuthInfo, title, body string) bool {
+	return s.sendOne(authInfo, Message{Title: title, Body: body})
+}
+
 func (s *Service) recordHistory(userID int, key string, msg Message, success bool, channelCount int) {
 	if s == nil || s.store == nil || s.store.DB == nil || userID == 0 {
 		return
@@ -182,7 +186,7 @@ func (s *Service) sendHTTPGet(cfg map[string]string, msg Message) bool {
 	if raw == "" {
 		return false
 	}
-	resp, err := s.client.Get(applyTemplate(raw, msg))
+	resp, err := s.httpClient(cfg).Get(applyTemplate(raw, msg))
 	return closeOK(resp, err)
 }
 
@@ -199,7 +203,7 @@ func (s *Service) sendHTTPPost(cfg map[string]string, msg Message) bool {
 	if data == "" {
 		data = fmt.Sprintf(`{"title":%q,"data":%q,"body":%q,"url":%q}`, msg.Title, msg.Body, msg.Body, msg.URL)
 	}
-	resp, err := s.client.Post(applyTemplate(raw, msg), contentType, strings.NewReader(data))
+	resp, err := s.httpClient(cfg).Post(applyTemplate(raw, msg), contentType, strings.NewReader(data))
 	return closeOK(resp, err)
 }
 
@@ -215,14 +219,14 @@ func (s *Service) sendTelegram(cfg map[string]string, msg Message) bool {
 		if msg.Body != "" {
 			caption += "\n" + msg.Body
 		}
-		return s.postForm(api, url.Values{"chat_id": {chatID}, "photo": {msg.URL}, "caption": {caption}})
+		return s.postForm(cfg, api, url.Values{"chat_id": {chatID}, "photo": {msg.URL}, "caption": {caption}})
 	}
 	text := msg.Title + "\n" + msg.Body
 	if msg.URL != "" {
 		text += "\n" + msg.URL
 	}
 	api := fmt.Sprintf("%s/bot%s/sendMessage", s.telegramBase, token)
-	return s.postForm(api, url.Values{"chat_id": {chatID}, "text": {text}})
+	return s.postForm(cfg, api, url.Values{"chat_id": {chatID}, "text": {text}})
 }
 
 func (s *Service) sendDingtalk(cfg map[string]string, msg Message) bool {
@@ -243,7 +247,7 @@ func (s *Service) sendDingtalk(cfg map[string]string, msg Message) bool {
 		"msgtype": "text",
 		"text":    map[string]string{"content": msg.Title + "\n" + msg.Body},
 	}
-	return s.sendWebhook(webhook, payload)
+	return s.sendWebhook(cfg, webhook, payload)
 }
 
 func (s *Service) sendFeishu(cfg map[string]string, msg Message) bool {
@@ -260,7 +264,7 @@ func (s *Service) sendFeishu(cfg map[string]string, msg Message) bool {
 		payload["timestamp"] = strconv.FormatInt(timestamp, 10)
 		payload["sign"] = feishuSign(timestamp, secret)
 	}
-	return s.sendWebhook(webhook, payload)
+	return s.sendWebhook(cfg, webhook, payload)
 }
 
 func weixinNewsPayload(extra map[string]interface{}, title, body, link string) map[string]interface{} {
@@ -302,7 +306,7 @@ func (s *Service) sendWeixin(cfg map[string]string, msg Message) bool {
 				"text":    map[string]string{"content": msg.Title + "\n" + msg.Body},
 			}
 		}
-		return s.sendWebhook(webhook, payload)
+		return s.sendWebhook(cfg, webhook, payload)
 	}
 	corpID := first(cfg, "Corpid", "CorpId", "corpId")
 	secret := first(cfg, "Corpsecret", "CorpSecret", "Secret")
@@ -314,7 +318,7 @@ func (s *Service) sendWeixin(cfg map[string]string, msg Message) bool {
 	if corpID == "" || secret == "" || agentID == "" {
 		return false
 	}
-	token, ok := s.weixinToken(corpID, secret)
+	token, ok := s.weixinToken(cfg, corpID, secret)
 	if !ok {
 		return false
 	}
@@ -339,7 +343,7 @@ func (s *Service) sendWeixin(cfg map[string]string, msg Message) bool {
 		}
 	}
 	api := fmt.Sprintf("%s/cgi-bin/message/send?access_token=%s", s.weixinBase, url.QueryEscape(token))
-	return s.postJSON(api, payload)
+	return s.postJSON(cfg, api, payload)
 }
 
 func preferredImageURL(msg Message) string {
@@ -420,7 +424,7 @@ func (s *Service) sendWxPusher(cfg map[string]string, msg Message) bool {
 		if msg.URL != "" {
 			payload["url"] = msg.URL
 		}
-		return s.postWxPusher("https://wxpusher.zjiecode.com/api/send/message/simple-push", payload)
+		return s.postWxPusher(cfg, "https://wxpusher.zjiecode.com/api/send/message/simple-push", payload)
 	}
 	// 标准推送（AppToken + UID 模式）
 	appToken := first(cfg, "AppToken", "appToken")
@@ -438,12 +442,12 @@ func (s *Service) sendWxPusher(cfg map[string]string, msg Message) bool {
 	if msg.URL != "" {
 		payload["url"] = msg.URL
 	}
-	return s.postWxPusher("https://wxpusher.zjiecode.com/api/send/message", payload)
+	return s.postWxPusher(cfg, "https://wxpusher.zjiecode.com/api/send/message", payload)
 }
 
-func (s *Service) postWxPusher(apiURL string, payload interface{}) bool {
+func (s *Service) postWxPusher(cfg map[string]string, apiURL string, payload interface{}) bool {
 	data, _ := json.Marshal(payload)
-	resp, err := s.client.Post(apiURL, "application/json", bytes.NewReader(data))
+	resp, err := s.httpClient(cfg).Post(apiURL, "application/json", bytes.NewReader(data))
 	if err != nil || resp == nil {
 		return false
 	}
@@ -460,7 +464,7 @@ func (s *Service) postWxPusher(apiURL string, payload interface{}) bool {
 
 func (s *Service) sendBark(cfg map[string]string, msg Message) bool {
 	if sendURL := first(cfg, "SendUrl", "URL", "Url", "url"); sendURL != "" {
-		resp, err := s.client.Get(applyTemplate(sendURL, msg))
+		resp, err := s.httpClient(cfg).Get(applyTemplate(sendURL, msg))
 		return closeOK(resp, err)
 	}
 	deviceKey := first(cfg, "DeviceKey", "DeviceToken", "deviceToken", "token")
@@ -484,27 +488,27 @@ func (s *Service) sendBark(cfg map[string]string, msg Message) bool {
 	if encoded := q.Encode(); encoded != "" {
 		api += "?" + encoded
 	}
-	resp, err := s.client.Get(api)
+	resp, err := s.httpClient(cfg).Get(api)
 	return closeOK(resp, err)
 }
 
 func (s *Service) sendByKnownFields(cfg map[string]string, msg Message) bool {
 	if webhook := first(cfg, "WebHook", "Webhook", "Url", "URL", "url"); webhook != "" {
-		return s.sendWebhook(webhook, map[string]interface{}{"title": msg.Title, "body": msg.Body, "url": msg.URL})
+		return s.sendWebhook(cfg, webhook, map[string]interface{}{"title": msg.Title, "body": msg.Body, "url": msg.URL})
 	}
 	return false
 }
 
-func (s *Service) sendWebhook(webhook string, payload map[string]interface{}) bool {
+func (s *Service) sendWebhook(cfg map[string]string, webhook string, payload map[string]interface{}) bool {
 	if webhook == "" {
 		return false
 	}
-	return s.postJSON(webhook, payload)
+	return s.postJSON(cfg, webhook, payload)
 }
 
-func (s *Service) weixinToken(corpID, secret string) (string, bool) {
+func (s *Service) weixinToken(cfg map[string]string, corpID, secret string) (string, bool) {
 	api := fmt.Sprintf("%s/cgi-bin/gettoken?corpid=%s&corpsecret=%s", s.weixinBase, url.QueryEscape(corpID), url.QueryEscape(secret))
-	resp, err := s.client.Get(api)
+	resp, err := s.httpClient(cfg).Get(api)
 	if err != nil || resp == nil {
 		return "", false
 	}
@@ -524,15 +528,38 @@ func (s *Service) weixinToken(corpID, secret string) (string, bool) {
 	return body.AccessToken, body.AccessToken != "" && body.ErrCode == 0
 }
 
-func (s *Service) postJSON(raw string, payload interface{}) bool {
+func (s *Service) postJSON(cfg map[string]string, raw string, payload interface{}) bool {
 	data, _ := json.Marshal(payload)
-	resp, err := s.client.Post(raw, "application/json", bytes.NewReader(data))
+	resp, err := s.httpClient(cfg).Post(raw, "application/json", bytes.NewReader(data))
 	return closeOK(resp, err)
 }
 
-func (s *Service) postForm(raw string, values url.Values) bool {
-	resp, err := s.client.PostForm(raw, values)
+func (s *Service) postForm(cfg map[string]string, raw string, values url.Values) bool {
+	resp, err := s.httpClient(cfg).PostForm(raw, values)
 	return closeOK(resp, err)
+}
+
+func (s *Service) httpClient(cfg map[string]string) *http.Client {
+	if !configBool(cfg, "UseProxy", "useProxy") {
+		return s.client
+	}
+	proxyAddress := strings.TrimSpace(first(cfg, "ProxyAddress", "proxyAddress"))
+	if proxyAddress == "" && s.store != nil {
+		proxyAddress = strings.TrimSpace(s.store.GetSystemValue("proxyAddress"))
+	}
+	if proxyAddress == "" {
+		return s.client
+	}
+	proxyURL, err := url.Parse(proxyAddress)
+	if err != nil {
+		return s.client
+	}
+	return &http.Client{
+		Timeout: s.client.Timeout,
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+	}
 }
 
 func (s *Service) increment(templateID string) {
@@ -562,6 +589,11 @@ func first(cfg map[string]string, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func configBool(cfg map[string]string, keys ...string) bool {
+	value := strings.ToLower(strings.TrimSpace(first(cfg, keys...)))
+	return value == "true" || value == "1" || value == "yes" || value == "on"
 }
 
 func decodeConfig(raw string) (map[string]string, error) {

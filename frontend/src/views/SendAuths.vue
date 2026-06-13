@@ -45,6 +45,9 @@
         <el-form-item label="名称">
           <el-input v-model="form.name" />
         </el-form-item>
+        <el-form-item label="启用代理">
+          <el-switch v-model="form.config.UseProxy" />
+        </el-form-item>
         <template v-if="isWeixinScanTemplate">
           <el-form-item label="绑定方式">
             <div class="stack" style="width:100%;gap:10px;">
@@ -75,6 +78,7 @@
         </el-form-item>
       </el-form>
       <template #footer>
+        <el-button :loading="testing" @click="testCurrent">测试</el-button>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
@@ -95,7 +99,8 @@ import {
   getSendTemplates,
   getWeixinBindUrl,
   modifySendAuth,
-  reSendKey
+  reSendKey,
+  testSendAuth
 } from '@/api/setting'
 
 const WEIXIN_SCAN_TEMPLATE_ID = 'B1E7D9D4-2A9C-4B5A-8E53-65CC6D8C1F20'
@@ -104,6 +109,7 @@ const auths = ref([])
 const templates = ref([])
 const dialogVisible = ref(false)
 const saving = ref(false)
+const testing = ref(false)
 const bindLoading = ref(false)
 const bindQr = ref('')
 const bindHint = ref('')
@@ -160,22 +166,27 @@ function handleTemplateChange() {
 }
 
 function syncFields() {
+  if (typeof form.config.UseProxy === 'undefined') form.config.UseProxy = false
   for (const field of selectedInputs.value) {
     if (typeof form.config[field.key] === 'undefined') form.config[field.key] = ''
+  }
+}
+
+function buildPayload() {
+  return {
+    id: form.id,
+    sendAuthId: form.id,
+    templateID: form.templateID,
+    name: form.name,
+    config: form.config,
+    active: editing.value?.active ?? true
   }
 }
 
 async function save() {
   saving.value = true
   try {
-    const payload = {
-      id: form.id,
-      sendAuthId: form.id,
-      templateID: form.templateID,
-      name: form.name,
-      config: form.config,
-      active: editing.value?.active ?? true
-    }
+    const payload = buildPayload()
     if (editing.value || form.id > 0) await modifySendAuth(payload)
     else await addSendAuth(payload)
     ElMessage.success('已保存')
@@ -183,6 +194,20 @@ async function save() {
     await load()
   } finally {
     saving.value = false
+  }
+}
+
+async function testCurrent() {
+  testing.value = true
+  try {
+    const result = await testSendAuth(buildPayload())
+    if (result?.success) {
+      ElMessage.success('测试消息已发送')
+    } else {
+      ElMessage.error('测试发送失败，请检查通道配置')
+    }
+  } finally {
+    testing.value = false
   }
 }
 

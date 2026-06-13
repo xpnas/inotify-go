@@ -20,8 +20,8 @@ export function getGithubEnable() {
   return request({ url: '/oauth/GithubEnable', method: 'get' })
 }
 
-export function githubLogin(code) {
-  return request({ url: '/oauth/githublogin', method: 'get', params: { code } })
+export function githubLogin(params) {
+  return request({ url: '/oauth/githublogin', method: 'get', params })
 }
 
 export function getWeixinQrEnable() {

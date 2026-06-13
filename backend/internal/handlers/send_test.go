@@ -24,6 +24,10 @@ func (s *captureSender) Send(token, key, title, body, _, _, _ string) bool {
 	s.token, s.key, s.title, s.body = token, key, title, body
 	return true
 }
+func (s *captureSender) TestSendAuth(_ models.SendAuthInfo, title, body string) bool {
+	s.title, s.body = title, body
+	return true
+}
 
 func TestSendAcceptsJSONPostAndEscapedNewline(t *testing.T) {
 	gin.SetMode(gin.TestMode)
