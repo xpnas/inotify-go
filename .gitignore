@@ -51,6 +51,19 @@ coverage/
 # Docker / local compose overrides
 docker-compose.override.yml
 
+# Documentation and AI-related files
+docs/
+.ai/
+.aider*
+.copilot/
+.cursor/
+.claude/
+AGENTS.md
+copilot-instructions.md
+*.prompt.md
+*.instructions.md
+*.agent.md
+
 # Archives and generated bundles
 *.zip
 *.tar
