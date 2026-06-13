@@ -1,0 +1,12 @@
+inotify_data/
+tmp/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+jwt.json
+*.exe
+*.test
+*.prof
+coverage.out
+*.log

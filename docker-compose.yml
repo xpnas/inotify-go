@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    image: inotify-backend:local
+    restart: unless-stopped
+    environment:
+      INOTIFY_ADDR: ":8000"
+      INOTIFY_DATA_DIR: "/app/inotify_data"
+    volumes:
+      - inotify_data:/app/inotify_data
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/Healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+    image: inotify-frontend:local
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${INOTIFY_HTTP_PORT:-9000}:80"
+
+volumes:
+  inotify_data:

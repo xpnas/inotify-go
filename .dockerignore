@@ -1,0 +1,13 @@
+.git
+.github
+.vscode
+.idea
+**/.DS_Store
+**/node_modules
+**/dist
+**/coverage
+**/inotify_data
+**/*.log
+**/.env
+backend/tmp
+frontend/.vite
