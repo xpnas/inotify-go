@@ -6,7 +6,7 @@ Inotify 是一个轻量级消息通知管理系统。当前项目已经重组为
 
 ## 技术栈
 
-- Backend: Go 1.22, Gin, Gorm, SQLite
+- Backend: Go 1.25, Gin, Gorm, SQLite
 - Frontend: Vue 3, Vite, Pinia, Vue Router, Element Plus
 - Deployment: Docker, Docker Compose, Nginx
 
@@ -50,7 +50,7 @@ Inotify 是一个轻量级消息通知管理系统。当前项目已经重组为
 确保已安装 Docker 和 Docker Compose，执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xpnas/inotify-go/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/xpnas/inotify-go/master/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
 
