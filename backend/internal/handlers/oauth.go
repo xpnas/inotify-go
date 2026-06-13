@@ -18,8 +18,8 @@ import (
 
 func (s *Server) RegisterOAuth(r gin.IRouter) {
 	g := r.Group("/oauth")
-	g.POST("/login", s.login)
-	g.POST("/Login", s.login)
+	g.POST("/login", LoginRateLimit(), s.login)
+	g.POST("/Login", LoginRateLimit(), s.login)
 	g.GET("/GithubEnable", s.githubEnable)
 	g.GET("/githubenable", s.githubEnable)
 	g.GET("/GithubLogin", s.githubLogin)
@@ -48,9 +48,17 @@ func (s *Server) login(c *gin.Context) {
 		password = req.Password
 	}
 	user, err := s.Store.GetUser(username)
-	if err != nil || !user.Active || user.Password != auth.MD5Hex(password) {
+	if err != nil || !user.Active || !auth.CheckPassword(user.Password, password) {
+		RecordFailedLogin(c)
 		Error(c, "用户名或密码错误")
 		return
+	}
+	// Transparently upgrade MD5 hash to bcrypt on successful login
+	if !strings.HasPrefix(user.Password, "$2") {
+		if h, err := auth.HashPassword(password); err == nil {
+			user.Password = h
+			_ = s.Store.DB.Save(&user).Error
+		}
 	}
 	role := s.Store.Role(username)
 	token, err := auth.GenerateToken(s.Store.JWTInfo, username, role)
@@ -135,10 +143,11 @@ func (s *Server) upsertWeixinUser(userName string) (*models.SendUserInfo, error)
 	if err != gorm.ErrRecordNotFound {
 		return nil, err
 	}
+	h, _ := auth.HashPassword("123456")
 	user = models.SendUserInfo{
 		SystemUserInfo: models.SystemUserInfo{
 			UserName:   userName,
-			Password:   auth.MD5Hex("123456"),
+			Password:   h,
 			Active:     true,
 			CreateTime: time.Now(),
 		},
@@ -202,7 +211,12 @@ func (s *Server) resetPassword(c *gin.Context) {
 	if password == "" {
 		password = "123456"
 	}
-	user.Password = auth.MD5Hex(password)
+	h, err := auth.HashPassword(password)
+	if err != nil {
+		Error(c, err.Error())
+		return
+	}
+	user.Password = h
 	if user.CreateTime.IsZero() {
 		user.CreateTime = time.Now()
 	}
@@ -301,10 +315,11 @@ func (s *Server) upsertGithubUser(gh githubUserInfo) (*models.SendUserInfo, erro
 	} else if err != gorm.ErrRecordNotFound {
 		return nil, err
 	}
+	h, _ := auth.HashPassword("123456")
 	user = models.SendUserInfo{
 		SystemUserInfo: models.SystemUserInfo{
 			UserName:   gh.Login,
-			Password:   auth.MD5Hex("123456"),
+			Password:   h,
 			Avatar:     gh.Avatar,
 			Email:      gh.Email,
 			Active:     true,

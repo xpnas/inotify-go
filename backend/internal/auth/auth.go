@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 	"inotify/backend/internal/models"
 )
 
@@ -20,6 +21,23 @@ const (
 func MD5Hex(value string) string {
 	sum := md5.Sum([]byte(value))
 	return strings.ToUpper(hex.EncodeToString(sum[:]))
+}
+
+// HashPassword returns a bcrypt hash of the password.
+func HashPassword(password string) (string, error) {
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(h), err
+}
+
+// CheckPassword verifies password against the stored hash.
+// It transparently accepts both bcrypt hashes and legacy MD5 hashes,
+// so existing accounts continue to work after the upgrade.
+func CheckPassword(stored, plaintext string) bool {
+	if strings.HasPrefix(stored, "$2") {
+		return bcrypt.CompareHashAndPassword([]byte(stored), []byte(plaintext)) == nil
+	}
+	// Legacy MD5 fallback
+	return stored == MD5Hex(plaintext)
 }
 
 func GenerateToken(jwtInfo models.JwtInfo, username, role string) (string, error) {

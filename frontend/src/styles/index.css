@@ -650,6 +650,40 @@ button, input { font: inherit; }
   margin: 10px 0 0;
 }
 
+.weixin-qr-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 4px;
+}
+
+.weixin-qr-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--c-text-light);
+  min-height: 200px;
+  justify-content: center;
+}
+
+#weixin-qr-container iframe {
+  display: block;
+}
+
+.weixin-qr-tip {
+  font-size: 13px;
+  text-align: center;
+}
+
+.login-qr-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
 /* ─── Table tweaks ───────────────────────────────── */
 
 .el-table {

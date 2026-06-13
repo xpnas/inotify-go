@@ -98,10 +98,11 @@ func (s *Store) seed() error {
 		return err
 	}
 	if count == 0 {
+		h, _ := auth.HashPassword("123456")
 		admin := models.SendUserInfo{
 			SystemUserInfo: models.SystemUserInfo{
 				UserName:   "admin",
-				Password:   auth.MD5Hex("123456"),
+				Password:   h,
 				Avatar:     "",
 				Email:      "",
 				Active:     true,
