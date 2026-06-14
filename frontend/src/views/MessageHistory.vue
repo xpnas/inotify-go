@@ -45,6 +45,11 @@
         <el-table-column prop="url" label="URL" min-width="180" show-overflow-tooltip />
         <el-table-column prop="group" label="分组" min-width="120" show-overflow-tooltip />
         <el-table-column prop="channelCount" label="通道数" width="92" align="center" />
+        <el-table-column prop="detail" label="详情" min-width="220">
+          <template #default="{ row }">
+            <div class="history-body">{{ row.detail || '-' }}</div>
+          </template>
+        </el-table-column>
         <el-table-column prop="success" label="状态" width="92" align="center">
           <template #default="{ row }">
             <el-tag :type="row.success ? 'success' : 'danger'" effect="plain">

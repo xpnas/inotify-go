@@ -40,6 +40,12 @@ export const menuRoutes = [
         meta: { title: '重置密码', roles: ['User', 'System'] }
       },
       {
+        path: '/settingpro/thirdparty',
+        name: 'ThirdPartyLogin',
+        component: () => import('@/views/ThirdPartyLogin.vue'),
+        meta: { title: '三方登录', roles: ['User', 'System'] }
+      },
+      {
         path: '/settingsys/systeminfo',
         name: 'SystemInfo',
         component: () => import('@/views/settings/SystemInfo.vue'),
@@ -71,6 +77,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'Login', component: () => import('@/views/Login.vue'), meta: { public: true } },
+    { path: '/oauth/github/callback', name: 'GithubCallback', component: () => import('@/views/GithubCallback.vue'), meta: { public: true } },
+    { path: '/oauth/weixin/callback', name: 'WeixinCallback', component: () => import('@/views/WeixinCallback.vue'), meta: { public: true } },
     ...menuRoutes,
     { path: '/:pathMatch(.*)*', name: 'NotFound', component: () => import('@/views/NotFound.vue'), meta: { public: true } }
   ]

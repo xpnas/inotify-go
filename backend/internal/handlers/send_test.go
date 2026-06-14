@@ -24,9 +24,9 @@ func (s *captureSender) Send(token, key, title, body, _, _, _ string) bool {
 	s.token, s.key, s.title, s.body = token, key, title, body
 	return true
 }
-func (s *captureSender) TestSendAuth(_ models.SendAuthInfo, title, body string) bool {
+func (s *captureSender) TestSendAuth(_ models.SendAuthInfo, title, body string) models.SendResult {
 	s.title, s.body = title, body
-	return true
+	return models.SendResult{Success: true}
 }
 
 func TestSendAcceptsJSONPostAndEscapedNewline(t *testing.T) {

@@ -5,6 +5,9 @@
       <el-form-item label="用户名">
         <el-input v-model="form.username" disabled />
       </el-form-item>
+      <el-form-item label="旧密码" prop="oldPassword">
+        <el-input v-model="form.oldPassword" type="password" show-password />
+      </el-form-item>
       <el-form-item label="新密码" prop="password">
         <el-input v-model="form.password" type="password" show-password />
       </el-form-item>
@@ -28,8 +31,9 @@ import { useAuthStore } from '@/stores/auth'
 const auth = useAuthStore()
 const formRef = ref()
 const loading = ref(false)
-const form = reactive({ username: auth.name, password: '', confirm: '' })
+const form = reactive({ username: auth.name, oldPassword: '', password: '', confirm: '' })
 const rules = {
+  oldPassword: [{ required: true, message: '请输入旧密码', trigger: 'blur' }],
   password: [{ required: true, min: 6, message: '至少 6 位', trigger: 'blur' }],
   confirm: [
     {
@@ -46,8 +50,9 @@ async function submit() {
   await formRef.value.validate()
   loading.value = true
   try {
-    await resetPassword({ username: form.username, password: form.password })
+    await resetPassword({ username: form.username, oldPassword: form.oldPassword, password: form.password })
     ElMessage.success('密码已更新')
+    form.oldPassword = ''
     form.password = ''
     form.confirm = ''
   } finally {

@@ -45,8 +45,11 @@
         <el-form-item label="名称">
           <el-input v-model="form.name" />
         </el-form-item>
-        <el-form-item label="启用代理">
-          <el-switch v-model="form.config.UseProxy" />
+        <el-form-item label="代理策略">
+          <el-segmented v-model="form.config.ProxyMode" :options="proxyOptions" />
+        </el-form-item>
+        <el-form-item v-if="form.config.ProxyMode === 'custom'" label="代理地址">
+          <el-input v-model="form.config.ProxyAddress" placeholder="http://127.0.0.1:7890" />
         </el-form-item>
         <template v-if="isWeixinScanTemplate">
           <el-form-item label="绑定方式">
@@ -77,6 +80,12 @@
           <el-input v-model="form.config[field.key]" :placeholder="field.placeholder" />
         </el-form-item>
       </el-form>
+      <div v-if="testResult" class="test-result" :class="testResult.success ? 'ok' : 'fail'">
+        <strong>{{ testResult.success ? '测试成功' : '测试失败' }}</strong>
+        <span>{{ testResult.message }}</span>
+        <span v-if="testResult.statusCode">HTTP {{ testResult.statusCode }}</span>
+        <pre v-if="testResult.response">{{ testResult.response }}</pre>
+      </div>
       <template #footer>
         <el-button :loading="testing" @click="testCurrent">测试</el-button>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -115,6 +124,12 @@ const bindQr = ref('')
 const bindHint = ref('')
 const editing = ref(null)
 const form = reactive({ id: 0, templateID: '', name: '', config: {} })
+const testResult = ref(null)
+const proxyOptions = [
+  { label: '不使用', value: 'no' },
+  { label: '全局代理', value: 'global' },
+  { label: '自定义', value: 'custom' }
+]
 
 const selectedTemplate = computed(() => templates.value.find((item) => item.key === form.templateID))
 const selectedInputs = computed(() => selectedTemplate.value?.inputs || [])
@@ -136,6 +151,7 @@ function openCreate() {
   form.config = {}
   bindQr.value = ''
   bindHint.value = ''
+  testResult.value = null
   syncFields()
   dialogVisible.value = true
 }
@@ -154,6 +170,7 @@ function openEdit(row) {
   bindHint.value = row.templateID === WEIXIN_SCAN_TEMPLATE_ID && row.config
     ? '若已扫码成功，请刷新列表查看绑定后的企业微信通道。'
     : ''
+  testResult.value = null
   syncFields()
   dialogVisible.value = true
 }
@@ -162,11 +179,16 @@ function handleTemplateChange() {
   if (selectedTemplate.value) form.name = selectedTemplate.value.name
   bindQr.value = ''
   bindHint.value = ''
+  testResult.value = null
   syncFields()
 }
 
 function syncFields() {
-  if (typeof form.config.UseProxy === 'undefined') form.config.UseProxy = false
+  if (!form.config.ProxyMode) {
+    form.config.ProxyMode = form.config.UseProxy ? 'global' : 'no'
+  }
+  form.config.UseProxy = form.config.ProxyMode !== 'no'
+  if (typeof form.config.ProxyAddress === 'undefined') form.config.ProxyAddress = ''
   for (const field of selectedInputs.value) {
     if (typeof form.config[field.key] === 'undefined') form.config[field.key] = ''
   }
@@ -186,6 +208,7 @@ function buildPayload() {
 async function save() {
   saving.value = true
   try {
+    form.config.UseProxy = form.config.ProxyMode !== 'no'
     const payload = buildPayload()
     if (editing.value || form.id > 0) await modifySendAuth(payload)
     else await addSendAuth(payload)
@@ -199,12 +222,15 @@ async function save() {
 
 async function testCurrent() {
   testing.value = true
+  testResult.value = null
   try {
+    form.config.UseProxy = form.config.ProxyMode !== 'no'
     const result = await testSendAuth(buildPayload())
+    testResult.value = result
     if (result?.success) {
       ElMessage.success('测试消息已发送')
     } else {
-      ElMessage.error('测试发送失败，请检查通道配置')
+      ElMessage.error(result?.message || '测试发送失败，请检查通道配置')
     }
   } finally {
     testing.value = false

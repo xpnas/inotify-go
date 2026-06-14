@@ -17,13 +17,16 @@ type JwtInfo struct {
 }
 
 type SystemUserInfo struct {
-	ID         int       `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	UserName   string    `gorm:"column:userName;uniqueIndex" json:"userName"`
-	Password   string    `gorm:"column:password" json:"password,omitempty"`
-	Avatar     string    `gorm:"column:avatar" json:"avatar"`
-	Email      string    `gorm:"column:email" json:"email"`
-	Active     bool      `gorm:"column:active" json:"active"`
-	CreateTime time.Time `gorm:"column:createTime" json:"createTime"`
+	ID          int       `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	UserName    string    `gorm:"column:userName;uniqueIndex" json:"userName"`
+	Password    string    `gorm:"column:password" json:"password,omitempty"`
+	Avatar      string    `gorm:"column:avatar" json:"avatar"`
+	Email       string    `gorm:"column:email" json:"email"`
+	GithubID    int64     `gorm:"column:githubId;index" json:"githubId"`
+	GithubLogin string    `gorm:"column:githubLogin;index" json:"githubLogin"`
+	WeixinID    string    `gorm:"column:weixinId;index" json:"weixinId"`
+	Active      bool      `gorm:"column:active" json:"active"`
+	CreateTime  time.Time `gorm:"column:createTime" json:"createTime"`
 }
 
 func (SystemUserInfo) TableName() string { return "systemUser" }
@@ -68,6 +71,7 @@ type MessageHistory struct {
 	SendKey      string    `gorm:"column:sendKey;index" json:"sendKey"`
 	Success      bool      `gorm:"column:success;index" json:"success"`
 	ChannelCount int       `gorm:"column:channelCount" json:"channelCount"`
+	Detail       string    `gorm:"column:detail" json:"detail"`
 	CreateTime   time.Time `gorm:"column:createTime;index" json:"createTime"`
 }
 
@@ -77,4 +81,11 @@ type APIResult struct {
 	Code int         `json:"code"`
 	Data interface{} `json:"data,omitempty"`
 	Msg  string      `json:"msg,omitempty"`
+}
+
+type SendResult struct {
+	Success    bool   `json:"success"`
+	Message    string `json:"message"`
+	StatusCode int    `json:"statusCode,omitempty"`
+	Response   string `json:"response,omitempty"`
 }

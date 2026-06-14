@@ -29,7 +29,9 @@ service.interceptors.response.use(
     return body.data
   },
   (error) => {
-    ElMessage.error(error.message || '网络异常')
+    if (!error.config?.silentError) {
+      ElMessage.error(error.message || '网络异常')
+    }
     return Promise.reject(error)
   }
 )

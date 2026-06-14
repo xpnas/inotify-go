@@ -21,7 +21,7 @@ type SenderService interface {
 	Templates() []map[string]interface{}
 	SendAuthTemplates() map[string]interface{}
 	Send(token, key, title, body, url, group, sound string) bool
-	TestSendAuth(authInfo models.SendAuthInfo, title, body string) bool
+	TestSendAuth(authInfo models.SendAuthInfo, title, body string) models.SendResult
 }
 
 func OK(c *gin.Context, data interface{}) {

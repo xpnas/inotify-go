@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"net/url"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +32,10 @@ func (s *Server) RegisterSystem(r gin.IRouter) {
 	g.GET("/GetSendTypeInfos", s.getSendTypeInfos)
 	g.GET("/getSendTypeInfos", s.getSendTypeInfos)
 	g.GET("/getGithubEnable", s.getGithubEnableForSystem)
+	g.GET("/Diagnostics", s.diagnostics)
+	g.GET("/diagnostics", s.diagnostics)
+	g.GET("/BackupDatabase", s.backupDatabase)
+	g.GET("/backupDatabase", s.backupDatabase)
 }
 
 func (s *Server) getGlobal(c *gin.Context) {
@@ -42,6 +49,54 @@ func (s *Server) getGlobal(c *gin.Context) {
 		"administrators":     s.Store.GetSystemValue("administrators"),
 		"adminUserName":      s.Store.GetSystemValue("adminUserName"),
 	})
+}
+
+func (s *Server) diagnostics(c *gin.Context) {
+	origin := c.Request.Header.Get("Origin")
+	if origin == "" {
+		scheme := "http"
+		if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		origin = scheme + "://" + c.Request.Host
+	}
+	proxyAddress := s.Store.GetSystemValue("proxyAddress")
+	proxyOK := proxyAddress == ""
+	if proxyAddress != "" {
+		_, err := url.Parse(proxyAddress)
+		proxyOK = err == nil
+	}
+	dataDirWritable := false
+	if s.Store.Config.DataDir != "" {
+		testFile := filepath.Join(s.Store.Config.DataDir, ".write-test")
+		if err := os.WriteFile(testFile, []byte("ok"), 0600); err == nil {
+			dataDirWritable = true
+			_ = os.Remove(testFile)
+		}
+	}
+	OK(c, gin.H{
+		"githubConfigured": s.Store.GetSystemValue("githubClientId") != "" && s.Store.GetSystemValue("githubClientSecret") != "",
+		"weixinConfigured": s.Store.GetSystemValue("weixinCorpId") != "" && s.Store.GetSystemValue("weixinCorpSecret") != "" && s.Store.GetSystemValue("weixinAgentId") != "",
+		"githubCallback":   origin + "/oauth/github/callback",
+		"weixinCallback":   origin + "/oauth/weixin/callback",
+		"proxyConfigured":  proxyAddress != "",
+		"proxyValid":       proxyOK,
+		"dataDir":          s.Store.Config.DataDir,
+		"dataDirWritable":  dataDirWritable,
+		"databasePath":     s.Store.Config.DBPath,
+	})
+}
+
+func (s *Server) backupDatabase(c *gin.Context) {
+	if s.Store.Config.DBPath == "" {
+		Error(c, "database path is empty")
+		return
+	}
+	if _, err := os.Stat(s.Store.Config.DBPath); err != nil {
+		Error(c, err.Error())
+		return
+	}
+	c.FileAttachment(s.Store.Config.DBPath, "inotify-backup.db")
 }
 
 func (s *Server) setGlobal(c *gin.Context) {

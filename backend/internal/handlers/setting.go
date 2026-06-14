@@ -245,8 +245,7 @@ func (s *Server) testSendAuth(c *gin.Context) {
 	if item.Config == "" {
 		item.Config = "{}"
 	}
-	ok := s.Sender.TestSendAuth(item, "Inotify 通道测试", "这是一条来自 Inotify 的测试消息")
-	OK(c, gin.H{"success": ok})
+	OK(c, s.Sender.TestSendAuth(item, "Inotify 通道测试", "这是一条来自 Inotify 的测试消息"))
 }
 
 func (s *Server) activeSendAuth(c *gin.Context) {

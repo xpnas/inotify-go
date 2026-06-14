@@ -108,7 +108,7 @@ const form = reactive({
 
 const brand = useBrandStore()
 const brandForm = reactive({ icon: brand.icon, name: brand.name })
-const githubRedirectUri = computed(() => `${window.location.origin}/login`)
+const githubRedirectUri = computed(() => `${window.location.origin}/oauth/github/callback`)
 
 onMounted(async () => {
   Object.assign(form, await getGlobal())

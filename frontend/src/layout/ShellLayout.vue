@@ -71,7 +71,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const brand = useBrandStore()
 
-const icons = [Key, Link, Bell, Clock, Lock, Monitor, User, Setting]
+const icons = [Key, Link, Bell, Clock, Lock, Link, Monitor, User, Setting]
 
 const visibleMenu = computed(() => {
   const children = menuRoutes[0].children

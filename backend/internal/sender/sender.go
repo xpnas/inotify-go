@@ -103,14 +103,14 @@ func (s *Service) Send(token, key, title, body, link, group, sound string) bool 
 	} else {
 		var user models.SendUserInfo
 		if err := s.store.DB.First(&user, "token = ?", token).Error; err != nil {
-			s.recordHistory(0, key, Message{Title: title, Body: body, URL: link, Group: group, Sound: sound}, false, 0)
+			s.recordHistory(0, key, Message{Title: title, Body: body, URL: link, Group: group, Sound: sound}, false, 0, "发送 token 无效")
 			return false
 		}
 		userID = user.ID
 		query = query.Where("userId = ?", user.ID)
 	}
 	if err := query.Find(&auths).Error; err != nil || len(auths) == 0 {
-		s.recordHistory(userID, key, Message{Title: title, Body: body, URL: link, Group: group, Sound: sound}, false, 0)
+		s.recordHistory(userID, key, Message{Title: title, Body: body, URL: link, Group: group, Sound: sound}, false, 0, "没有可用的已启用通道")
 		return false
 	}
 	if userID == 0 {
@@ -119,22 +119,25 @@ func (s *Service) Send(token, key, title, body, link, group, sound string) bool 
 	msg := Message{Title: title, Body: body, URL: link, Group: group, Sound: sound}
 	ok := false
 	count := 0
+	results := []models.SendResult{}
 	for _, authInfo := range auths {
-		if s.sendOne(authInfo, msg) {
+		result := s.sendOneResult(authInfo, msg)
+		results = append(results, result)
+		if result.Success {
 			ok = true
 			count++
 			s.increment(authInfo.TemplateID)
 		}
 	}
-	s.recordHistory(userID, key, msg, ok, count)
+	s.recordHistory(userID, key, msg, ok, count, summarizeResults(results))
 	return ok
 }
 
-func (s *Service) TestSendAuth(authInfo models.SendAuthInfo, title, body string) bool {
-	return s.sendOne(authInfo, Message{Title: title, Body: body})
+func (s *Service) TestSendAuth(authInfo models.SendAuthInfo, title, body string) models.SendResult {
+	return s.sendOneResult(authInfo, Message{Title: title, Body: body})
 }
 
-func (s *Service) recordHistory(userID int, key string, msg Message, success bool, channelCount int) {
+func (s *Service) recordHistory(userID int, key string, msg Message, success bool, channelCount int, detail string) {
 	if s == nil || s.store == nil || s.store.DB == nil || userID == 0 {
 		return
 	}
@@ -148,14 +151,15 @@ func (s *Service) recordHistory(userID int, key string, msg Message, success boo
 		SendKey:      key,
 		Success:      success,
 		ChannelCount: channelCount,
+		Detail:       detail,
 		CreateTime:   time.Now(),
 	}).Error
 }
 
-func (s *Service) sendOne(authInfo models.SendAuthInfo, msg Message) bool {
+func (s *Service) sendOneResult(authInfo models.SendAuthInfo, msg Message) models.SendResult {
 	cfg, err := decodeConfig(authInfo.Config)
 	if err != nil {
-		return false
+		return failResult("通道配置 JSON 解析失败: " + err.Error())
 	}
 	switch strings.ToLower(authInfo.TemplateID) {
 	case strings.ToLower("ADB11045-F2C8-457E-BF7E-1698AD37ED53"), strings.ToLower("HTTP-GET"):
@@ -181,19 +185,23 @@ func (s *Service) sendOne(authInfo models.SendAuthInfo, msg Message) bool {
 	}
 }
 
-func (s *Service) sendHTTPGet(cfg map[string]string, msg Message) bool {
-	raw := first(cfg, "URL", "Url", "url")
-	if raw == "" {
-		return false
-	}
-	resp, err := s.httpClient(cfg).Get(applyTemplate(raw, msg))
-	return closeOK(resp, err)
+func (s *Service) sendOne(authInfo models.SendAuthInfo, msg Message) bool {
+	return s.sendOneResult(authInfo, msg).Success
 }
 
-func (s *Service) sendHTTPPost(cfg map[string]string, msg Message) bool {
+func (s *Service) sendHTTPGet(cfg map[string]string, msg Message) models.SendResult {
+	raw := first(cfg, "URL", "Url", "url")
+	if raw == "" {
+		return failResult("缺少 URL")
+	}
+	resp, err := s.httpClient(cfg).Get(applyTemplate(raw, msg))
+	return closeResult(resp, err)
+}
+
+func (s *Service) sendHTTPPost(cfg map[string]string, msg Message) models.SendResult {
 	raw := first(cfg, "URL", "Url", "url", "WebHook")
 	if raw == "" {
-		return false
+		return failResult("缺少 URL")
 	}
 	contentType := first(cfg, "ContentType")
 	if contentType == "" {
@@ -204,14 +212,14 @@ func (s *Service) sendHTTPPost(cfg map[string]string, msg Message) bool {
 		data = fmt.Sprintf(`{"title":%q,"data":%q,"body":%q,"url":%q}`, msg.Title, msg.Body, msg.Body, msg.URL)
 	}
 	resp, err := s.httpClient(cfg).Post(applyTemplate(raw, msg), contentType, strings.NewReader(data))
-	return closeOK(resp, err)
+	return closeResult(resp, err)
 }
 
-func (s *Service) sendTelegram(cfg map[string]string, msg Message) bool {
+func (s *Service) sendTelegram(cfg map[string]string, msg Message) models.SendResult {
 	token := first(cfg, "BotToken", "botToken")
 	chatID := first(cfg, "ChatId", "Chat_id", "chat_id")
 	if token == "" || chatID == "" {
-		return false
+		return failResult("缺少 BotToken 或 ChatId")
 	}
 	if msg.URL != "" && isImageURL(msg.URL) {
 		api := fmt.Sprintf("%s/bot%s/sendPhoto", s.telegramBase, token)
@@ -229,10 +237,10 @@ func (s *Service) sendTelegram(cfg map[string]string, msg Message) bool {
 	return s.postForm(cfg, api, url.Values{"chat_id": {chatID}, "text": {text}})
 }
 
-func (s *Service) sendDingtalk(cfg map[string]string, msg Message) bool {
+func (s *Service) sendDingtalk(cfg map[string]string, msg Message) models.SendResult {
 	webhook := first(cfg, "WebHook", "Webhook", "url")
 	if webhook == "" {
-		return false
+		return failResult("缺少 WebHook")
 	}
 	if secret := first(cfg, "Secret"); secret != "" {
 		timestamp := time.Now().UTC().UnixMilli()
@@ -250,10 +258,10 @@ func (s *Service) sendDingtalk(cfg map[string]string, msg Message) bool {
 	return s.sendWebhook(cfg, webhook, payload)
 }
 
-func (s *Service) sendFeishu(cfg map[string]string, msg Message) bool {
+func (s *Service) sendFeishu(cfg map[string]string, msg Message) models.SendResult {
 	webhook := first(cfg, "WebHook", "Webhook", "url")
 	if webhook == "" {
-		return false
+		return failResult("缺少 WebHook")
 	}
 	payload := map[string]interface{}{
 		"msg_type": "text",
@@ -286,7 +294,7 @@ func weixinNewsPayload(extra map[string]interface{}, title, body, link string) m
 	return payload
 }
 
-func (s *Service) sendWeixin(cfg map[string]string, msg Message) bool {
+func (s *Service) sendWeixin(cfg map[string]string, msg Message) models.SendResult {
 	imageURL := preferredImageURL(msg)
 	desc := strings.TrimSpace(msg.Body)
 	if desc == imageURL {
@@ -316,11 +324,11 @@ func (s *Service) sendWeixin(cfg map[string]string, msg Message) bool {
 		toUser = "@all"
 	}
 	if corpID == "" || secret == "" || agentID == "" {
-		return false
+		return failResult("缺少 Corpid、Corpsecret 或 AgentID")
 	}
 	token, ok := s.weixinToken(cfg, corpID, secret)
 	if !ok {
-		return false
+		return failResult("获取企业微信 access token 失败")
 	}
 	var payload map[string]interface{}
 	if imageURL != "" {
@@ -376,13 +384,13 @@ func isHTTPURL(raw string) bool {
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
-func (s *Service) sendEmail(cfg map[string]string, msg Message) bool {
+func (s *Service) sendEmail(cfg map[string]string, msg Message) models.SendResult {
 	host := first(cfg, "Host", "SmtpHost")
 	user := first(cfg, "From", "User", "UserName", "Username")
 	pass := first(cfg, "Password")
 	to := first(cfg, "To", "Email")
 	if host == "" || user == "" || to == "" {
-		return false
+		return failResult("缺少 Host、From 或 To")
 	}
 	port := 465
 	fmt.Sscanf(first(cfg, "Port"), "%d", &port)
@@ -405,10 +413,13 @@ func (s *Service) sendEmail(cfg map[string]string, msg Message) bool {
 	} else if sslVal == "false" || sslVal == "0" {
 		d.SSL = false
 	}
-	return d.DialAndSend(m) == nil
+	if err := d.DialAndSend(m); err != nil {
+		return failResult("SMTP 发送失败: " + err.Error())
+	}
+	return okResult("SMTP 发送成功")
 }
 
-func (s *Service) sendWxPusher(cfg map[string]string, msg Message) bool {
+func (s *Service) sendWxPusher(cfg map[string]string, msg Message) models.SendResult {
 	content := msg.Title
 	if msg.Body != "" {
 		content += "\n" + msg.Body
@@ -430,7 +441,7 @@ func (s *Service) sendWxPusher(cfg map[string]string, msg Message) bool {
 	appToken := first(cfg, "AppToken", "appToken")
 	uid := first(cfg, "UID", "Uid", "uid")
 	if appToken == "" || uid == "" {
-		return false
+		return failResult("缺少 AppToken 或 UID")
 	}
 	payload := map[string]interface{}{
 		"appToken":    appToken,
@@ -445,31 +456,40 @@ func (s *Service) sendWxPusher(cfg map[string]string, msg Message) bool {
 	return s.postWxPusher(cfg, "https://wxpusher.zjiecode.com/api/send/message", payload)
 }
 
-func (s *Service) postWxPusher(cfg map[string]string, apiURL string, payload interface{}) bool {
+func (s *Service) postWxPusher(cfg map[string]string, apiURL string, payload interface{}) models.SendResult {
 	data, _ := json.Marshal(payload)
 	resp, err := s.httpClient(cfg).Post(apiURL, "application/json", bytes.NewReader(data))
 	if err != nil || resp == nil {
-		return false
+		return closeResult(resp, err)
 	}
 	defer resp.Body.Close()
+	status := resp.StatusCode
 	var result struct {
-		Success bool `json:"success"`
-		Code    int  `json:"code"`
+		Success bool   `json:"success"`
+		Code    int    `json:"code"`
+		Msg     string `json:"msg"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false
+		return models.SendResult{Success: false, Message: "解析 WxPusher 响应失败: " + err.Error(), StatusCode: status}
 	}
-	return result.Success && result.Code == 1000
+	if result.Success && result.Code == 1000 {
+		return models.SendResult{Success: true, Message: "WxPusher 发送成功", StatusCode: status}
+	}
+	msg := result.Msg
+	if msg == "" {
+		msg = fmt.Sprintf("WxPusher 返回 code=%d", result.Code)
+	}
+	return models.SendResult{Success: false, Message: msg, StatusCode: status}
 }
 
-func (s *Service) sendBark(cfg map[string]string, msg Message) bool {
+func (s *Service) sendBark(cfg map[string]string, msg Message) models.SendResult {
 	if sendURL := first(cfg, "SendUrl", "URL", "Url", "url"); sendURL != "" {
 		resp, err := s.httpClient(cfg).Get(applyTemplate(sendURL, msg))
-		return closeOK(resp, err)
+		return closeResult(resp, err)
 	}
 	deviceKey := first(cfg, "DeviceKey", "DeviceToken", "deviceToken", "token")
 	if deviceKey == "" {
-		return false
+		return failResult("缺少 DeviceKey 或 SendUrl")
 	}
 	api := "https://api.day.app/" + url.PathEscape(deviceKey) + "/" + url.PathEscape(msg.Title) + "/" + url.PathEscape(msg.Body)
 	q := url.Values{}
@@ -489,19 +509,19 @@ func (s *Service) sendBark(cfg map[string]string, msg Message) bool {
 		api += "?" + encoded
 	}
 	resp, err := s.httpClient(cfg).Get(api)
-	return closeOK(resp, err)
+	return closeResult(resp, err)
 }
 
-func (s *Service) sendByKnownFields(cfg map[string]string, msg Message) bool {
+func (s *Service) sendByKnownFields(cfg map[string]string, msg Message) models.SendResult {
 	if webhook := first(cfg, "WebHook", "Webhook", "Url", "URL", "url"); webhook != "" {
 		return s.sendWebhook(cfg, webhook, map[string]interface{}{"title": msg.Title, "body": msg.Body, "url": msg.URL})
 	}
-	return false
+	return failResult("未识别的通道配置")
 }
 
-func (s *Service) sendWebhook(cfg map[string]string, webhook string, payload map[string]interface{}) bool {
+func (s *Service) sendWebhook(cfg map[string]string, webhook string, payload map[string]interface{}) models.SendResult {
 	if webhook == "" {
-		return false
+		return failResult("缺少 WebHook")
 	}
 	return s.postJSON(cfg, webhook, payload)
 }
@@ -528,23 +548,33 @@ func (s *Service) weixinToken(cfg map[string]string, corpID, secret string) (str
 	return body.AccessToken, body.AccessToken != "" && body.ErrCode == 0
 }
 
-func (s *Service) postJSON(cfg map[string]string, raw string, payload interface{}) bool {
+func (s *Service) postJSON(cfg map[string]string, raw string, payload interface{}) models.SendResult {
 	data, _ := json.Marshal(payload)
 	resp, err := s.httpClient(cfg).Post(raw, "application/json", bytes.NewReader(data))
-	return closeOK(resp, err)
+	return closeResult(resp, err)
 }
 
-func (s *Service) postForm(cfg map[string]string, raw string, values url.Values) bool {
+func (s *Service) postForm(cfg map[string]string, raw string, values url.Values) models.SendResult {
 	resp, err := s.httpClient(cfg).PostForm(raw, values)
-	return closeOK(resp, err)
+	return closeResult(resp, err)
 }
 
 func (s *Service) httpClient(cfg map[string]string) *http.Client {
-	if !configBool(cfg, "UseProxy", "useProxy") {
+	mode := strings.ToLower(strings.TrimSpace(first(cfg, "ProxyMode", "proxyMode")))
+	if mode == "" {
+		if configBool(cfg, "UseProxy", "useProxy") {
+			mode = "global"
+		} else {
+			mode = "no"
+		}
+	}
+	if mode == "none" || mode == "no" || mode == "off" {
 		return s.client
 	}
-	proxyAddress := strings.TrimSpace(first(cfg, "ProxyAddress", "proxyAddress"))
-	if proxyAddress == "" && s.store != nil {
+	proxyAddress := ""
+	if mode == "custom" {
+		proxyAddress = strings.TrimSpace(first(cfg, "ProxyAddress", "proxyAddress"))
+	} else if s.store != nil {
 		proxyAddress = strings.TrimSpace(s.store.GetSystemValue("proxyAddress"))
 	}
 	if proxyAddress == "" {
@@ -580,6 +610,56 @@ func closeOK(resp *http.Response, err error) bool {
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
+func closeResult(resp *http.Response, err error) models.SendResult {
+	if err != nil {
+		return failResult("网络请求失败: " + err.Error())
+	}
+	if resp == nil {
+		return failResult("网络请求失败: 响应为空")
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+	response := strings.TrimSpace(string(data))
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return models.SendResult{Success: true, Message: "发送成功", StatusCode: resp.StatusCode, Response: response}
+	}
+	msg := fmt.Sprintf("HTTP 状态码 %d", resp.StatusCode)
+	if response != "" {
+		msg += ": " + response
+	}
+	return models.SendResult{Success: false, Message: msg, StatusCode: resp.StatusCode, Response: response}
+}
+
+func okResult(message string) models.SendResult {
+	return models.SendResult{Success: true, Message: message}
+}
+
+func failResult(message string) models.SendResult {
+	return models.SendResult{Success: false, Message: message}
+}
+
+func summarizeResults(results []models.SendResult) string {
+	if len(results) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(results))
+	for i, result := range results {
+		status := "失败"
+		if result.Success {
+			status = "成功"
+		}
+		message := result.Message
+		if message == "" && result.Response != "" {
+			message = result.Response
+		}
+		if message == "" {
+			message = status
+		}
+		lines = append(lines, fmt.Sprintf("通道%d %s: %s", i+1, status, message))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func first(cfg map[string]string, keys ...string) string {

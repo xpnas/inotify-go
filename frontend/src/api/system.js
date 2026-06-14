@@ -35,3 +35,11 @@ export function getSendInfos() {
 export function getSendTypeInfos() {
   return request({ url: '/settingsys/GetSendTypeInfos', method: 'get' })
 }
+
+export function getDiagnostics() {
+  return request({ url: '/settingsys/Diagnostics', method: 'get', silentError: true })
+}
+
+export function backupDatabase() {
+  return request({ url: '/settingsys/BackupDatabase', method: 'get', responseType: 'blob' })
+}

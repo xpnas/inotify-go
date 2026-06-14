@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 
-import { getInfo, githubLogin, login, logout } from '@/api/user'
+import { getInfo, githubBind, githubLogin, githubUnbind, login, logout, weixinQrBind, weixinQrUnbind } from '@/api/user'
 
 const TOKEN_KEY = 'inotify-token'
 
@@ -10,7 +10,10 @@ export const useAuthStore = defineStore('auth', {
     name: '',
     role: '',
     avatar: '',
-    email: ''
+    email: '',
+    githubLogin: '',
+    githubId: 0,
+    weixinId: ''
   }),
   getters: {
     isSystem: (state) => state.role === 'System' || state.role === 'system'
@@ -31,6 +34,9 @@ export const useAuthStore = defineStore('auth', {
       this.role = data.role || (Array.isArray(data.roles) ? data.roles[0] : '')
       this.avatar = data.avatar || ''
       this.email = data.email || ''
+      this.githubLogin = data.githubLogin || ''
+      this.githubId = data.githubId || 0
+      this.weixinId = data.weixinId || ''
       return data
     },
     acceptLogin(data) {
@@ -39,12 +45,35 @@ export const useAuthStore = defineStore('auth', {
       this.role = data.role
       this.avatar = data.avatar || ''
       this.email = data.email || ''
+      this.githubLogin = data.githubLogin || ''
+      this.githubId = data.githubId || 0
+      this.weixinId = data.weixinId || ''
       localStorage.setItem(TOKEN_KEY, data.token)
     },
     async githubLogin(params) {
       const data = await githubLogin(params)
       this.acceptLogin(data)
       return data
+    },
+    async githubBind(params) {
+      const data = await githubBind(params)
+      this.githubLogin = data.githubLogin || ''
+      this.githubId = data.githubId || 0
+      return data
+    },
+    async githubUnbind() {
+      await githubUnbind()
+      this.githubLogin = ''
+      this.githubId = 0
+    },
+    async weixinQrBind(params) {
+      const data = await weixinQrBind(params)
+      this.weixinId = data.weixinId || ''
+      return data
+    },
+    async weixinQrUnbind() {
+      await weixinQrUnbind()
+      this.weixinId = ''
     },
     async logout() {
       try {
@@ -59,6 +88,9 @@ export const useAuthStore = defineStore('auth', {
       this.role = ''
       this.avatar = ''
       this.email = ''
+      this.githubLogin = ''
+      this.githubId = 0
+      this.weixinId = ''
       localStorage.removeItem(TOKEN_KEY)
     }
   }

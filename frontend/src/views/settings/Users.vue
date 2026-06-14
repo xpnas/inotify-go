@@ -9,6 +9,12 @@
     <el-table :data="users" border>
       <el-table-column prop="userName" label="用户名" min-width="140" />
       <el-table-column prop="email" label="邮箱" min-width="180" />
+      <el-table-column prop="githubLogin" label="GitHub" min-width="140">
+        <template #default="{ row }">{{ row.githubLogin || '-' }}</template>
+      </el-table-column>
+      <el-table-column prop="weixinId" label="企业微信" min-width="160">
+        <template #default="{ row }">{{ row.weixinId || '-' }}</template>
+      </el-table-column>
       <el-table-column prop="token" label="Token" min-width="260" />
       <el-table-column prop="active" label="激活" width="96" align="center">
         <template #default="{ row }">

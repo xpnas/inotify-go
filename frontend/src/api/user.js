@@ -24,10 +24,26 @@ export function githubLogin(params) {
   return request({ url: '/oauth/githublogin', method: 'get', params })
 }
 
+export function githubBind(params) {
+  return request({ url: '/oauth/githubbind', method: 'get', params })
+}
+
+export function githubUnbind() {
+  return request({ url: '/oauth/githubunbind', method: 'post' })
+}
+
 export function getWeixinQrEnable() {
   return request({ url: '/oauth/WeixinQrEnable', method: 'get' })
 }
 
 export function weixinQrLogin(params) {
   return request({ url: '/oauth/WeixinQrLogin', method: 'get', params })
+}
+
+export function weixinQrBind(params) {
+  return request({ url: '/oauth/WeixinQrBind', method: 'get', params })
+}
+
+export function weixinQrUnbind() {
+  return request({ url: '/oauth/WeixinQrUnbind', method: 'post' })
 }

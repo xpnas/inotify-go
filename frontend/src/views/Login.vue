@@ -15,13 +15,13 @@
 
       <!-- 二维码视图 -->
       <div v-if="showQr" class="login-form login-qr-view">
-        <p class="login-form-title">微信扫码登录</p>
+        <p class="login-form-title">企业微信扫码登录</p>
         <div v-if="weixinQrLoading" class="weixin-qr-loading">
           <el-icon class="is-loading" :size="32"><Loading /></el-icon>
           <span>正在加载二维码…</span>
         </div>
         <div id="weixin-qr-container" ref="qrContainer" />
-        <p class="weixin-qr-tip muted">使用微信或企业微信扫码登录</p>
+        <p class="weixin-qr-tip muted">使用企业微信扫码登录</p>
         <el-button size="large" style="width:100%;margin-top:4px;" @click="backToPassword">返回密码登录</el-button>
       </div>
 
@@ -39,7 +39,7 @@
           GitHub 登录
         </el-button>
         <el-button v-if="weixinQrEnabled" class="github-login" size="large" @click="openWeixinQr">
-          微信扫码登录
+          企业微信扫码登录
         </el-button>
       </el-form>
     </section>
@@ -79,31 +79,6 @@ onMounted(async () => {
   githubEnabled.value = Boolean(ghEnabled)
   weixinQrEnabled.value = Boolean(wxEnabled)
 
-  const code = route.query.code
-  const state = route.query.state
-  if (code && state === 'inotify_weixin_login') {
-    showQr.value = true
-    weixinQrLoading.value = true
-    try {
-      const data = await weixinQrLogin({ code })
-      auth.acceptLogin(data)
-      router.replace('/')
-    } catch {
-      weixinQrLoading.value = false
-      showQr.value = false
-    }
-    return
-  }
-  if (code) {
-    githubLoading.value = true
-    try {
-      const data = await githubLogin({ code, redirectUri: `${window.location.origin}/login` })
-      auth.acceptLogin(data)
-      router.push('/')
-    } finally {
-      githubLoading.value = false
-    }
-  }
 })
 
 async function submit() {
@@ -121,7 +96,7 @@ async function submit() {
 async function loginWithGithub() {
   githubLoading.value = true
   try {
-    const url = await githubLogin({ redirectUri: `${window.location.origin}/login` })
+    const url = await githubLogin({ redirectUri: `${window.location.origin}/oauth/github/callback` })
     window.location.href = url
   } finally {
     githubLoading.value = false
@@ -133,7 +108,7 @@ async function openWeixinQr() {
   weixinQrLoading.value = true
   await nextTick()
   try {
-    const redirectUri = `${window.location.origin}/login`
+    const redirectUri = `${window.location.origin}/oauth/weixin/callback`
     const qrUrl = await weixinQrLogin({ redirectUri })
     const parsed = new URL(qrUrl)
     const appid = parsed.searchParams.get('appid') || ''

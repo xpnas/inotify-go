@@ -114,17 +114,17 @@ GitHub Settings -> Developer settings -> OAuth Apps -> New OAuth App
 
 ```text
 Homepage URL: https://你的域名
-Authorization callback URL: https://你的域名/login
+Authorization callback URL: https://你的域名/oauth/github/callback
 ```
 
 本地开发示例：
 
 ```text
 Homepage URL: http://localhost:9000
-Authorization callback URL: http://localhost:9000/login
+Authorization callback URL: http://localhost:9000/oauth/github/callback
 ```
 
-创建完成后复制 `Client ID` 和 `Client Secret`，登录 Inotify 后台，在 `系统管理 -> 全局设置 -> GitHub 登录设置` 中填写并保存。页面会显示当前应填写到 GitHub OAuth App 的 `GitHub redirect_uri`，通常为当前站点地址加 `/login`。
+创建完成后复制 `Client ID` 和 `Client Secret`，登录 Inotify 后台，在 `系统管理 -> 全局设置 -> GitHub 登录设置` 中填写并保存。页面会显示当前应填写到 GitHub OAuth App 的 `GitHub redirect_uri`，通常为当前站点地址加 `/oauth/github/callback`。
 
 如果服务器访问 GitHub 较慢或受限，可以在同一页面填写 `代理地址`，例如：
 
@@ -133,6 +133,16 @@ http://127.0.0.1:7890
 ```
 
 清空 `GitHub Client ID` 或 `GitHub Client Secret` 后保存，即可关闭 GitHub 登录入口。
+
+已有账号可以登录后进入 `三方登录`，把当前 Inotify 账号绑定到 GitHub 或企业微信。绑定后再使用三方登录时，会进入这个已有账号，而不是按三方账号标识创建新账号。
+
+## 运维与排障
+
+- 通道新增和编辑页面支持测试发送，并显示 HTTP 状态码、响应摘要或配置缺失原因。
+- 通道代理策略支持 `不使用`、`全局代理`、`自定义代理地址`。
+- 历史记录会保存通道发送详情，失败时可查看失败原因摘要。
+- 系统状态页面提供配置诊断、回调地址检查、数据目录可写性检查和 SQLite 数据库备份下载。
+- 用户管理页面会显示 GitHub 与企业微信绑定状态。
 
 ## 消息发送
 
