@@ -136,6 +136,58 @@ func TestWeixinTokenThenSend(t *testing.T) {
 	}
 }
 
+func TestWeixinUploadsImageThenSendsMedia(t *testing.T) {
+	var sentPayloads []map[string]interface{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dynamic":
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write([]byte{0xff, 0xd8, 0xff, 0xdb, 0, 0, 0, 0, 0xff, 0xd9})
+		case "/cgi-bin/gettoken":
+			_, _ = w.Write([]byte(`{"errcode":0,"access_token":"token123"}`))
+		case "/cgi-bin/media/upload":
+			if r.URL.Query().Get("type") != "image" {
+				t.Fatalf("upload type = %q", r.URL.RawQuery)
+			}
+			if err := r.ParseMultipartForm(3 << 20); err != nil {
+				t.Fatalf("multipart: %v", err)
+			}
+			if _, _, err := r.FormFile("media"); err != nil {
+				t.Fatalf("media file: %v", err)
+			}
+			_, _ = w.Write([]byte(`{"errcode":0,"media_id":"media123"}`))
+		case "/cgi-bin/message/send":
+			var payload map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			sentPayloads = append(sentPayloads, payload)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	s := New(nil)
+	s.SetProviderBases("", ts.URL)
+	auth := models.SendAuthInfo{
+		TemplateID: "409A30D5-ABE8-4A28-BADD-D04B9908D763",
+		Config:     `{"Corpid":"corp","Corpsecret":"secret","AgentID":"100","OpengId":"@all","ImageMode":"upload"}`,
+	}
+	if !s.sendOne(auth, Message{Title: "title", Body: "body", URL: ts.URL + "/dynamic?f=JPEG&w=1024"}) {
+		t.Fatal("weixin image send failed")
+	}
+	if len(sentPayloads) != 2 {
+		t.Fatalf("sent payload count = %d", len(sentPayloads))
+	}
+	if sentPayloads[0]["msgtype"] != "text" || sentPayloads[1]["msgtype"] != "image" {
+		t.Fatalf("bad payloads: %#v", sentPayloads)
+	}
+	image, _ := sentPayloads[1]["image"].(map[string]interface{})
+	if image["media_id"] != "media123" {
+		t.Fatalf("bad image payload: %#v", sentPayloads[1])
+	}
+}
+
 func TestDecodeConfigAcceptsNumbersAndBools(t *testing.T) {
 	cfg, err := decodeConfig(`{"Port":587,"EnableSSL":true,"Host":"smtp.example.com"}`)
 	if err != nil {

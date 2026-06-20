@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -295,7 +296,7 @@ func weixinNewsPayload(extra map[string]interface{}, title, body, link string) m
 }
 
 func (s *Service) sendWeixin(cfg map[string]string, msg Message) models.SendResult {
-	imageURL := preferredImageURL(msg)
+	imageURL := preferredWeixinImageURL(msg)
 	desc := strings.TrimSpace(msg.Body)
 	if desc == imageURL {
 		desc = ""
@@ -330,6 +331,12 @@ func (s *Service) sendWeixin(cfg map[string]string, msg Message) models.SendResu
 	if !ok {
 		return failResult("获取企业微信 access token 失败")
 	}
+	if imageURL != "" && shouldUploadWeixinImage(cfg) {
+		result := s.sendWeixinUploadedImage(cfg, token, agentID, toUser, msg, imageURL, desc)
+		if result.Success || weixinImageMode(cfg) == "upload" {
+			return result
+		}
+	}
 	var payload map[string]interface{}
 	if imageURL != "" {
 		payload = weixinNewsPayload(map[string]interface{}{
@@ -354,11 +361,180 @@ func (s *Service) sendWeixin(cfg map[string]string, msg Message) models.SendResu
 	return s.postJSON(cfg, api, payload)
 }
 
+func weixinImageMode(cfg map[string]string) string {
+	mode := strings.ToLower(strings.TrimSpace(first(cfg, "ImageMode", "imageMode", "ImageSendMode")))
+	switch mode {
+	case "upload", "uploaded", "media":
+		return "upload"
+	case "auto":
+		return "auto"
+	default:
+		return "news"
+	}
+}
+
+func shouldUploadWeixinImage(cfg map[string]string) bool {
+	mode := weixinImageMode(cfg)
+	return mode == "upload" || mode == "auto"
+}
+
+func (s *Service) sendWeixinUploadedImage(cfg map[string]string, token, agentID, toUser string, msg Message, imageURL, desc string) models.SendResult {
+	image, filename, contentType, result := s.downloadImage(cfg, imageURL)
+	if !result.Success {
+		return result
+	}
+	mediaID, result := s.uploadWeixinMedia(cfg, token, filename, contentType, image)
+	if !result.Success {
+		return result
+	}
+	api := fmt.Sprintf("%s/cgi-bin/message/send?access_token=%s", s.weixinBase, url.QueryEscape(token))
+	if strings.TrimSpace(msg.Title) != "" || strings.TrimSpace(desc) != "" {
+		text := strings.TrimSpace(msg.Title + "\n" + desc)
+		if text != "" {
+			textPayload := map[string]interface{}{
+				"touser":  toUser,
+				"msgtype": "text",
+				"agentid": agentID,
+				"text":    map[string]string{"content": text},
+				"safe":    0,
+			}
+			if textResult := s.postJSON(cfg, api, textPayload); !textResult.Success {
+				return textResult
+			}
+		}
+	}
+	imagePayload := map[string]interface{}{
+		"touser":  toUser,
+		"msgtype": "image",
+		"agentid": agentID,
+		"image":   map[string]string{"media_id": mediaID},
+		"safe":    0,
+	}
+	return s.postJSON(cfg, api, imagePayload)
+}
+
+func (s *Service) downloadImage(cfg map[string]string, raw string) ([]byte, string, string, models.SendResult) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, "", "", failResult("图片 URL 无效")
+	}
+	resp, err := s.httpClient(cfg).Get(u.String())
+	if err != nil {
+		return nil, "", "", failResult("下载图片失败: " + err.Error())
+	}
+	if resp == nil {
+		return nil, "", "", failResult("下载图片失败: 响应为空")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		io.Copy(io.Discard, resp.Body)
+		return nil, "", "", models.SendResult{Success: false, Message: fmt.Sprintf("下载图片失败: HTTP %d", resp.StatusCode), StatusCode: resp.StatusCode}
+	}
+	const maxImageSize = 2 * 1024 * 1024
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxImageSize+1))
+	if err != nil {
+		return nil, "", "", failResult("读取图片失败: " + err.Error())
+	}
+	if len(data) > maxImageSize {
+		return nil, "", "", failResult("图片超过 2MB，无法上传到企业微信")
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if idx := strings.Index(contentType, ";"); idx >= 0 {
+		contentType = strings.TrimSpace(contentType[:idx])
+	}
+	if contentType == "" || contentType == "application/octet-stream" {
+		contentType = http.DetectContentType(data)
+	}
+	ext := ".jpg"
+	switch strings.ToLower(contentType) {
+	case "image/jpeg", "image/jpg":
+		contentType = "image/jpeg"
+		ext = ".jpg"
+	case "image/png":
+		ext = ".png"
+	default:
+		return nil, "", "", failResult("企业微信图片上传仅支持 JPG/PNG")
+	}
+	filename := "image" + ext
+	if base := pathBase(u.Path); base != "" {
+		filename = base
+	}
+	return data, filename, contentType, okResult("图片下载成功")
+}
+
+func (s *Service) uploadWeixinMedia(cfg map[string]string, token, filename, contentType string, data []byte) (string, models.SendResult) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("media", filename)
+	if err != nil {
+		return "", failResult("创建上传表单失败: " + err.Error())
+	}
+	if _, err := part.Write(data); err != nil {
+		return "", failResult("写入上传表单失败: " + err.Error())
+	}
+	if err := writer.Close(); err != nil {
+		return "", failResult("关闭上传表单失败: " + err.Error())
+	}
+	api := fmt.Sprintf("%s/cgi-bin/media/upload?access_token=%s&type=image", s.weixinBase, url.QueryEscape(token))
+	req, err := http.NewRequest(http.MethodPost, api, &body)
+	if err != nil {
+		return "", failResult("创建企业微信上传请求失败: " + err.Error())
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if contentType != "" {
+		req.Header.Set("X-Upload-Content-Type", contentType)
+	}
+	resp, err := s.httpClient(cfg).Do(req)
+	if err != nil {
+		return "", failResult("上传企业微信图片失败: " + err.Error())
+	}
+	if resp == nil {
+		return "", failResult("上传企业微信图片失败: 响应为空")
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+	var bodyResp struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+		MediaID string `json:"media_id"`
+	}
+	if err := json.Unmarshal(raw, &bodyResp); err != nil {
+		return "", models.SendResult{Success: false, Message: "解析企业微信上传响应失败: " + err.Error(), StatusCode: resp.StatusCode, Response: strings.TrimSpace(string(raw))}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || bodyResp.ErrCode != 0 || bodyResp.MediaID == "" {
+		msg := bodyResp.ErrMsg
+		if msg == "" {
+			msg = fmt.Sprintf("企业微信上传失败 errcode=%d", bodyResp.ErrCode)
+		}
+		return "", models.SendResult{Success: false, Message: msg, StatusCode: resp.StatusCode, Response: strings.TrimSpace(string(raw))}
+	}
+	return bodyResp.MediaID, okResult("企业微信图片上传成功")
+}
+
+func pathBase(value string) string {
+	value = strings.TrimRight(value, "/")
+	if value == "" {
+		return ""
+	}
+	idx := strings.LastIndex(value, "/")
+	if idx >= 0 {
+		return value[idx+1:]
+	}
+	return value
+}
+
 func preferredImageURL(msg Message) string {
 	if candidate := extractImageURL(msg.URL); candidate != "" {
 		return candidate
 	}
 	return extractImageURL(msg.Body)
+}
+
+func preferredWeixinImageURL(msg Message) string {
+	if candidate := extractHTTPURL(msg.URL); candidate != "" {
+		return candidate
+	}
+	return extractHTTPURL(msg.Body)
 }
 
 func extractImageURL(raw string) string {
@@ -373,6 +549,24 @@ func extractImageURL(raw string) string {
 	if len(fields) > 0 {
 		first := strings.TrimSpace(fields[0])
 		if isHTTPURL(first) && isImageURL(first) {
+			return first
+		}
+	}
+	return ""
+}
+
+func extractHTTPURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	if isHTTPURL(value) {
+		return value
+	}
+	fields := strings.Fields(value)
+	if len(fields) > 0 {
+		first := strings.TrimSpace(fields[0])
+		if isHTTPURL(first) {
 			return first
 		}
 	}
@@ -702,7 +896,7 @@ func decodeConfig(raw string) (map[string]string, error) {
 
 func templates() []Template {
 	return []Template{
-		{ID: "409A30D5-ABE8-4A28-BADD-D04B9908D763", Name: "企业微信", Order: 0, Inputs: []Input{{0, "Corpid", "Corpid", "企业ID"}, {1, "Corpsecret", "Corpsecret", "密钥"}, {2, "AgentID", "AgentID", "应用ID"}, {3, "OpengId", "OpengId", "@all"}}},
+		{ID: "409A30D5-ABE8-4A28-BADD-D04B9908D763", Name: "企业微信", Order: 0, Inputs: []Input{{0, "Corpid", "Corpid", "企业ID"}, {1, "Corpsecret", "Corpsecret", "密钥"}, {2, "AgentID", "AgentID", "应用ID"}, {3, "OpengId", "OpengId", "@all"}, {4, "图片发送方式", "ImageMode", "news|upload|auto"}}},
 		{ID: "B1E7D9D4-2A9C-4B5A-8E53-65CC6D8C1F20", Name: "企业微信扫码绑定", Order: 1, Inputs: []Input{}},
 		{ID: "EA2B43F7-956C-4C01-B583-0C943ABB36C3", Name: "邮件推送", Order: 1, Inputs: []Input{{0, "FromName", "FromName", "管理员"}, {1, "From", "From", "abc@qq.com"}, {2, "Password", "Password", "123456"}, {3, "Host", "Host", "smtp.qq.com"}, {4, "Port", "Port", "587"}, {5, "EnableSSL", "EnableSSL", "true|false"}, {6, "To", "To", "abcd@qq.com"}}},
 		{ID: "E9669473-FF0B-4474-92BB-E939D92045BB", Name: "电报机器人", Order: 2, Inputs: []Input{{0, "BotToken", "BotToken", "ID:Token"}, {1, "Chat_id", "ChatId", "ChatId"}}},

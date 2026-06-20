@@ -77,7 +77,12 @@
           :key="field.key"
           :label="field.name"
         >
-          <el-input v-model="form.config[field.key]" :placeholder="field.placeholder" />
+          <el-select v-if="field.key === 'ImageMode'" v-model="form.config[field.key]">
+            <el-option label="图文卡片" value="news" />
+            <el-option label="上传后发送" value="upload" />
+            <el-option label="自动" value="auto" />
+          </el-select>
+          <el-input v-else v-model="form.config[field.key]" :placeholder="field.placeholder" />
         </el-form-item>
       </el-form>
       <div v-if="testResult" class="test-result" :class="testResult.success ? 'ok' : 'fail'">
@@ -191,6 +196,9 @@ function syncFields() {
   if (typeof form.config.ProxyAddress === 'undefined') form.config.ProxyAddress = ''
   for (const field of selectedInputs.value) {
     if (typeof form.config[field.key] === 'undefined') form.config[field.key] = ''
+  }
+  if (typeof form.config.ImageMode !== 'undefined' && form.config.ImageMode === '') {
+    form.config.ImageMode = 'news'
   }
 }
 
